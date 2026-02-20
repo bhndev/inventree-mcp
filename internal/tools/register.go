@@ -29,11 +29,13 @@ func RegisterAll(server *mcp.Server, c *client.Client) {
 	RegisterGetLocation(server, c)
 	RegisterListLocations(server, c)
 	RegisterCreateLocation(server, c)
+	RegisterUpdateLocation(server, c)
 	RegisterDeleteLocation(server, c)
 
 	// Categories
 	RegisterSearchCategories(server, c)
 	RegisterListCategories(server, c)
 	RegisterCreateCategory(server, c)
+	RegisterUpdateCategory(server, c)
 	RegisterDeleteCategory(server, c)
 }

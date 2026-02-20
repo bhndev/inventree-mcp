@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
 
 	"github.com/chrisbotelho/inventree-mcp/internal/client"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -49,7 +50,7 @@ func RegisterSearchParts(server *mcp.Server, c *client.Client) {
 		if limit <= 0 {
 			limit = 25
 		}
-		path := fmt.Sprintf("/api/part/?search=%s&limit=%d&format=json", input.Search, limit)
+		path := fmt.Sprintf("/api/part/?search=%s&limit=%d&format=json", url.QueryEscape(input.Search), limit)
 		var resp client.PaginatedResponse[Part]
 		if err := c.Get(path, &resp); err != nil {
 			return errResult(fmt.Errorf("searching parts: %w", err)), nil, nil
@@ -86,7 +87,7 @@ func RegisterGetPart(server *mcp.Server, c *client.Client) {
 type CreatePartInput struct {
 	Name         string `json:"name" jsonschema:"Part name (required)"`
 	Description  string `json:"description,omitempty" jsonschema:"Part description"`
-	Category     *int   `json:"category,omitempty" jsonschema:"Category ID for the part"`
+	Category     int    `json:"category,omitempty" jsonschema:"Category ID for the part. 0 or omit for uncategorized."`
 	IPN          string `json:"IPN,omitempty" jsonschema:"Internal Part Number"`
 	Keywords     string `json:"keywords,omitempty" jsonschema:"Keywords for search"`
 	Units        string `json:"units,omitempty" jsonschema:"Units of measure"`
@@ -101,7 +102,7 @@ type CreatePartInput struct {
 func RegisterCreatePart(server *mcp.Server, c *client.Client) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "create_part",
-		Description: "Create a new part in InvenTree. At minimum, a name is required. Returns the created part with its ID. Always search for existing parts first to avoid duplicates.",
+		Description: "Create a new part in InvenTree. Returns the created part with its ID. IMPORTANT workflow: (1) search_parts to check for duplicates, (2) list_part_categories to see the FULL category hierarchy (check pathstring fields to understand nesting), (3) find the deepest, most specific category that fits this part — categories can be nested many levels deep (e.g. Electronic Components/Resistors/Through Hole/1/8 Watt), so always prefer the most specific match, (4) if no suitable category exists, create one with create_part_category under the most appropriate parent — do NOT put a part in an unrelated category just because it exists, and do NOT create top-level categories when the part belongs under an existing parent, (5) create the part with the correct category ID. Parts should always have a category.",
 		Annotations: &mcp.ToolAnnotations{
 			DestructiveHint: boolPtr(false),
 		},
@@ -112,8 +113,8 @@ func RegisterCreatePart(server *mcp.Server, c *client.Client) {
 		if input.Description != "" {
 			payload["description"] = input.Description
 		}
-		if input.Category != nil {
-			payload["category"] = *input.Category
+		if input.Category != 0 {
+			payload["category"] = input.Category
 		}
 		if input.IPN != "" {
 			payload["IPN"] = input.IPN
@@ -157,12 +158,12 @@ type UpdatePartInput struct {
 	ID           int    `json:"id" jsonschema:"The part ID (pk) to update"`
 	Name         string `json:"name,omitempty" jsonschema:"New part name"`
 	Description  string `json:"description,omitempty" jsonschema:"New description"`
-	Category     *int   `json:"category,omitempty" jsonschema:"New category ID"`
+	Category     int    `json:"category,omitempty" jsonschema:"New category ID. 0 or omit to leave unchanged."`
 	Active       *bool  `json:"active,omitempty" jsonschema:"Whether the part is active"`
 	IPN          string `json:"IPN,omitempty" jsonschema:"New Internal Part Number"`
 	Keywords     string `json:"keywords,omitempty" jsonschema:"New keywords"`
 	Units        string `json:"units,omitempty" jsonschema:"New units of measure"`
-	MinimumStock *int   `json:"minimum_stock,omitempty" jsonschema:"New minimum stock level"`
+	MinimumStock int    `json:"minimum_stock,omitempty" jsonschema:"New minimum stock level. 0 or omit to leave unchanged."`
 }
 
 func RegisterUpdatePart(server *mcp.Server, c *client.Client) {
@@ -177,8 +178,8 @@ func RegisterUpdatePart(server *mcp.Server, c *client.Client) {
 		if input.Description != "" {
 			payload["description"] = input.Description
 		}
-		if input.Category != nil {
-			payload["category"] = *input.Category
+		if input.Category != 0 {
+			payload["category"] = input.Category
 		}
 		if input.Active != nil {
 			payload["active"] = *input.Active
@@ -192,8 +193,8 @@ func RegisterUpdatePart(server *mcp.Server, c *client.Client) {
 		if input.Units != "" {
 			payload["units"] = input.Units
 		}
-		if input.MinimumStock != nil {
-			payload["minimum_stock"] = *input.MinimumStock
+		if input.MinimumStock != 0 {
+			payload["minimum_stock"] = input.MinimumStock
 		}
 
 		if len(payload) == 0 {
@@ -238,9 +239,9 @@ func RegisterDeletePart(server *mcp.Server, c *client.Client) {
 // -- List Parts --
 
 type ListPartsInput struct {
-	Category *int `json:"category,omitempty" jsonschema:"Filter by category ID"`
-	Limit    int  `json:"limit,omitempty" jsonschema:"Maximum number of results (default 50)"`
-	Offset   int  `json:"offset,omitempty" jsonschema:"Offset for pagination"`
+	Category int `json:"category,omitempty" jsonschema:"Filter by category ID. 0 or omit to list all."`
+	Limit    int `json:"limit,omitempty" jsonschema:"Maximum number of results (default 50)"`
+	Offset   int `json:"offset,omitempty" jsonschema:"Offset for pagination"`
 }
 
 func RegisterListParts(server *mcp.Server, c *client.Client) {
@@ -253,8 +254,8 @@ func RegisterListParts(server *mcp.Server, c *client.Client) {
 			limit = 50
 		}
 		path := fmt.Sprintf("/api/part/?limit=%d&offset=%d&format=json", limit, input.Offset)
-		if input.Category != nil {
-			path += fmt.Sprintf("&category=%d", *input.Category)
+		if input.Category != 0 {
+			path += fmt.Sprintf("&category=%d", input.Category)
 		}
 
 		var resp client.PaginatedResponse[Part]

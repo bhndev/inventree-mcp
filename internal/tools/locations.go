@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"fmt"
+	"net/url"
 
 	"github.com/chrisbotelho/inventree-mcp/internal/client"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -40,7 +41,7 @@ func RegisterSearchLocations(server *mcp.Server, c *client.Client) {
 		if limit <= 0 {
 			limit = 25
 		}
-		path := fmt.Sprintf("/api/stock/location/?search=%s&limit=%d&format=json", input.Search, limit)
+		path := fmt.Sprintf("/api/stock/location/?search=%s&limit=%d&format=json", url.QueryEscape(input.Search), limit)
 		var resp client.PaginatedResponse[StockLocation]
 		if err := c.Get(path, &resp); err != nil {
 			return errResult(fmt.Errorf("searching locations: %w", err)), nil, nil
@@ -75,9 +76,9 @@ func RegisterGetLocation(server *mcp.Server, c *client.Client) {
 // -- List Stock Locations --
 
 type ListLocationsInput struct {
-	Parent *int `json:"parent,omitempty" jsonschema:"Filter by parent location ID. Use null/omit for top-level locations."`
-	Limit  int  `json:"limit,omitempty" jsonschema:"Maximum number of results (default 100)"`
-	Offset int  `json:"offset,omitempty" jsonschema:"Offset for pagination"`
+	Parent int `json:"parent,omitempty" jsonschema:"Filter by parent location ID. 0 or omit to list all."`
+	Limit  int `json:"limit,omitempty" jsonschema:"Maximum number of results (default 100)"`
+	Offset int `json:"offset,omitempty" jsonschema:"Offset for pagination"`
 }
 
 func RegisterListLocations(server *mcp.Server, c *client.Client) {
@@ -90,8 +91,8 @@ func RegisterListLocations(server *mcp.Server, c *client.Client) {
 			limit = 100
 		}
 		path := fmt.Sprintf("/api/stock/location/?limit=%d&offset=%d&format=json", limit, input.Offset)
-		if input.Parent != nil {
-			path += fmt.Sprintf("&parent=%d", *input.Parent)
+		if input.Parent != 0 {
+			path += fmt.Sprintf("&parent=%d", input.Parent)
 		}
 
 		var resp client.PaginatedResponse[StockLocation]
@@ -110,7 +111,7 @@ func RegisterListLocations(server *mcp.Server, c *client.Client) {
 type CreateLocationInput struct {
 	Name        string `json:"name" jsonschema:"Location name (required)"`
 	Description string `json:"description,omitempty" jsonschema:"Location description"`
-	Parent      *int   `json:"parent,omitempty" jsonschema:"Parent location ID. Omit for top-level location."`
+	Parent      int    `json:"parent,omitempty" jsonschema:"Parent location ID. 0 or omit for top-level location."`
 	Structural  *bool  `json:"structural,omitempty" jsonschema:"If true, stock cannot be directly stored here (only in sub-locations)"`
 }
 
@@ -128,8 +129,8 @@ func RegisterCreateLocation(server *mcp.Server, c *client.Client) {
 		if input.Description != "" {
 			payload["description"] = input.Description
 		}
-		if input.Parent != nil {
-			payload["parent"] = *input.Parent
+		if input.Parent != 0 {
+			payload["parent"] = input.Parent
 		}
 		if input.Structural != nil {
 			payload["structural"] = *input.Structural
@@ -140,6 +141,44 @@ func RegisterCreateLocation(server *mcp.Server, c *client.Client) {
 			return errResult(fmt.Errorf("creating location: %w", err)), nil, nil
 		}
 		return jsonResult(created)
+	})
+}
+
+// -- Update Stock Location --
+
+type UpdateLocationInput struct {
+	ID          int    `json:"id" jsonschema:"The location ID (pk) to update"`
+	Name        string `json:"name,omitempty" jsonschema:"New location name"`
+	Description string `json:"description,omitempty" jsonschema:"New location description"`
+	Parent      int    `json:"parent,omitempty" jsonschema:"New parent location ID. 0 or omit to leave unchanged."`
+}
+
+func RegisterUpdateLocation(server *mcp.Server, c *client.Client) {
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "update_stock_location",
+		Description: "Update an existing stock location's fields. Only provided fields are changed. Use this to rename locations, change descriptions, or move a location under a different parent.",
+	}, func(ctx context.Context, req *mcp.CallToolRequest, input UpdateLocationInput) (*mcp.CallToolResult, any, error) {
+		payload := map[string]any{}
+		if input.Name != "" {
+			payload["name"] = input.Name
+		}
+		if input.Description != "" {
+			payload["description"] = input.Description
+		}
+		if input.Parent != 0 {
+			payload["parent"] = input.Parent
+		}
+
+		if len(payload) == 0 {
+			return errResult(fmt.Errorf("no fields to update")), nil, nil
+		}
+
+		var updated StockLocation
+		path := fmt.Sprintf("/api/stock/location/%d/", input.ID)
+		if err := c.Patch(path, payload, &updated); err != nil {
+			return errResult(fmt.Errorf("updating location %d: %w", input.ID, err)), nil, nil
+		}
+		return jsonResult(updated)
 	})
 }
 

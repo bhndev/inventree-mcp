@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"fmt"
+	"net/url"
 
 	"github.com/chrisbotelho/inventree-mcp/internal/client"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -40,7 +41,7 @@ func RegisterSearchCategories(server *mcp.Server, c *client.Client) {
 		if limit <= 0 {
 			limit = 25
 		}
-		path := fmt.Sprintf("/api/part/category/?search=%s&limit=%d&format=json", input.Search, limit)
+		path := fmt.Sprintf("/api/part/category/?search=%s&limit=%d&format=json", url.QueryEscape(input.Search), limit)
 		var resp client.PaginatedResponse[PartCategory]
 		if err := c.Get(path, &resp); err != nil {
 			return errResult(fmt.Errorf("searching categories: %w", err)), nil, nil
@@ -55,9 +56,9 @@ func RegisterSearchCategories(server *mcp.Server, c *client.Client) {
 // -- List Part Categories --
 
 type ListCategoriesInput struct {
-	Parent *int `json:"parent,omitempty" jsonschema:"Filter by parent category ID"`
-	Limit  int  `json:"limit,omitempty" jsonschema:"Maximum number of results (default 100)"`
-	Offset int  `json:"offset,omitempty" jsonschema:"Offset for pagination"`
+	Parent int `json:"parent,omitempty" jsonschema:"Filter by parent category ID. 0 or omit to list all."`
+	Limit  int `json:"limit,omitempty" jsonschema:"Maximum number of results (default 100)"`
+	Offset int `json:"offset,omitempty" jsonschema:"Offset for pagination"`
 }
 
 func RegisterListCategories(server *mcp.Server, c *client.Client) {
@@ -70,8 +71,8 @@ func RegisterListCategories(server *mcp.Server, c *client.Client) {
 			limit = 100
 		}
 		path := fmt.Sprintf("/api/part/category/?limit=%d&offset=%d&format=json", limit, input.Offset)
-		if input.Parent != nil {
-			path += fmt.Sprintf("&parent=%d", *input.Parent)
+		if input.Parent != 0 {
+			path += fmt.Sprintf("&parent=%d", input.Parent)
 		}
 
 		var resp client.PaginatedResponse[PartCategory]
@@ -90,8 +91,8 @@ func RegisterListCategories(server *mcp.Server, c *client.Client) {
 type CreateCategoryInput struct {
 	Name            string `json:"name" jsonschema:"Category name (required)"`
 	Description     string `json:"description,omitempty" jsonschema:"Category description"`
-	Parent          *int   `json:"parent,omitempty" jsonschema:"Parent category ID. Omit for top-level category."`
-	DefaultLocation *int   `json:"default_location,omitempty" jsonschema:"Default stock location ID for parts in this category"`
+	Parent          int    `json:"parent,omitempty" jsonschema:"Parent category ID. 0 or omit for top-level category."`
+	DefaultLocation int    `json:"default_location,omitempty" jsonschema:"Default stock location ID for parts in this category. 0 or omit for none."`
 	Structural      *bool  `json:"structural,omitempty" jsonschema:"If true, parts cannot be directly assigned to this category (only to sub-categories)"`
 }
 
@@ -109,11 +110,11 @@ func RegisterCreateCategory(server *mcp.Server, c *client.Client) {
 		if input.Description != "" {
 			payload["description"] = input.Description
 		}
-		if input.Parent != nil {
-			payload["parent"] = *input.Parent
+		if input.Parent != 0 {
+			payload["parent"] = input.Parent
 		}
-		if input.DefaultLocation != nil {
-			payload["default_location"] = *input.DefaultLocation
+		if input.DefaultLocation != 0 {
+			payload["default_location"] = input.DefaultLocation
 		}
 		if input.Structural != nil {
 			payload["structural"] = *input.Structural
@@ -124,6 +125,48 @@ func RegisterCreateCategory(server *mcp.Server, c *client.Client) {
 			return errResult(fmt.Errorf("creating category: %w", err)), nil, nil
 		}
 		return jsonResult(created)
+	})
+}
+
+// -- Update Part Category --
+
+type UpdateCategoryInput struct {
+	ID              int    `json:"id" jsonschema:"The category ID (pk) to update"`
+	Name            string `json:"name,omitempty" jsonschema:"New category name"`
+	Description     string `json:"description,omitempty" jsonschema:"New category description"`
+	Parent          int    `json:"parent,omitempty" jsonschema:"New parent category ID. 0 or omit to leave unchanged."`
+	DefaultLocation int    `json:"default_location,omitempty" jsonschema:"New default stock location ID. 0 or omit to leave unchanged."`
+}
+
+func RegisterUpdateCategory(server *mcp.Server, c *client.Client) {
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "update_part_category",
+		Description: "Update an existing part category's fields. Only provided fields are changed. Use this to rename categories, change descriptions, or move a category under a different parent.",
+	}, func(ctx context.Context, req *mcp.CallToolRequest, input UpdateCategoryInput) (*mcp.CallToolResult, any, error) {
+		payload := map[string]any{}
+		if input.Name != "" {
+			payload["name"] = input.Name
+		}
+		if input.Description != "" {
+			payload["description"] = input.Description
+		}
+		if input.Parent != 0 {
+			payload["parent"] = input.Parent
+		}
+		if input.DefaultLocation != 0 {
+			payload["default_location"] = input.DefaultLocation
+		}
+
+		if len(payload) == 0 {
+			return errResult(fmt.Errorf("no fields to update")), nil, nil
+		}
+
+		var updated PartCategory
+		path := fmt.Sprintf("/api/part/category/%d/", input.ID)
+		if err := c.Patch(path, payload, &updated); err != nil {
+			return errResult(fmt.Errorf("updating category %d: %w", input.ID, err)), nil, nil
+		}
+		return jsonResult(updated)
 	})
 }
 

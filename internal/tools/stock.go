@@ -32,10 +32,10 @@ type StockItem struct {
 // -- Get Stock --
 
 type GetStockInput struct {
-	Part     *int `json:"part,omitempty" jsonschema:"Filter by part ID"`
-	Location *int `json:"location,omitempty" jsonschema:"Filter by location ID"`
-	Limit    int  `json:"limit,omitempty" jsonschema:"Maximum number of results (default 50)"`
-	Offset   int  `json:"offset,omitempty" jsonschema:"Offset for pagination"`
+	Part     int `json:"part,omitempty" jsonschema:"Filter by part ID. 0 or omit to list all."`
+	Location int `json:"location,omitempty" jsonschema:"Filter by location ID. 0 or omit to list all."`
+	Limit    int `json:"limit,omitempty" jsonschema:"Maximum number of results (default 50)"`
+	Offset   int `json:"offset,omitempty" jsonschema:"Offset for pagination"`
 }
 
 func RegisterGetStock(server *mcp.Server, c *client.Client) {
@@ -48,11 +48,11 @@ func RegisterGetStock(server *mcp.Server, c *client.Client) {
 			limit = 50
 		}
 		path := fmt.Sprintf("/api/stock/?limit=%d&offset=%d&format=json", limit, input.Offset)
-		if input.Part != nil {
-			path += fmt.Sprintf("&part=%d", *input.Part)
+		if input.Part != 0 {
+			path += fmt.Sprintf("&part=%d", input.Part)
 		}
-		if input.Location != nil {
-			path += fmt.Sprintf("&location=%d", *input.Location)
+		if input.Location != 0 {
+			path += fmt.Sprintf("&location=%d", input.Location)
 		}
 
 		var resp client.PaginatedResponse[StockItem]
@@ -91,7 +91,7 @@ func RegisterGetStockItem(server *mcp.Server, c *client.Client) {
 type AddStockInput struct {
 	Part     int     `json:"part" jsonschema:"Part ID to add stock for (required)"`
 	Quantity float64 `json:"quantity" jsonschema:"Quantity to add (required)"`
-	Location *int    `json:"location,omitempty" jsonschema:"Location ID where stock will be stored"`
+	Location int     `json:"location,omitempty" jsonschema:"Location ID where stock will be stored. 0 or omit for no location."`
 	Batch    string  `json:"batch,omitempty" jsonschema:"Batch code"`
 	Serial   string  `json:"serial,omitempty" jsonschema:"Serial number (for trackable parts)"`
 	Notes    string  `json:"notes,omitempty" jsonschema:"Notes about this stock item"`
@@ -109,8 +109,8 @@ func RegisterAddStock(server *mcp.Server, c *client.Client) {
 			"part":     input.Part,
 			"quantity": input.Quantity,
 		}
-		if input.Location != nil {
-			payload["location"] = *input.Location
+		if input.Location != 0 {
+			payload["location"] = input.Location
 		}
 		if input.Batch != "" {
 			payload["batch"] = input.Batch
