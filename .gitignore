@@ -27,3 +27,6 @@ Thumbs.db
 
 # Environment
 .env
+
+# MCP config (contains API tokens)
+.mcp.json
