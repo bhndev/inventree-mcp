@@ -6,23 +6,24 @@ import (
 	"net/url"
 
 	"github.com/chrisbotelho/inventree-mcp/internal/client"
+	"github.com/chrisbotelho/inventree-mcp/internal/coerce"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // StockLocation represents an InvenTree stock location.
 type StockLocation struct {
-	PK          int      `json:"pk"`
-	Name        string   `json:"name"`
-	Description string   `json:"description"`
-	Parent      *int     `json:"parent"`
-	PathString  string   `json:"pathstring"`
-	Level       int      `json:"level"`
-	Items       int      `json:"items"`
-	Sublocations int     `json:"sublocations"`
-	Structural  bool     `json:"structural"`
-	External    bool     `json:"external"`
-	Icon        string   `json:"icon"`
-	Tags        []string `json:"tags"`
+	PK           int      `json:"pk"`
+	Name         string   `json:"name"`
+	Description  string   `json:"description"`
+	Parent       *int     `json:"parent"`
+	PathString   string   `json:"pathstring"`
+	Level        int      `json:"level"`
+	Items        int      `json:"items"`
+	Sublocations int      `json:"sublocations"`
+	Structural   bool     `json:"structural"`
+	External     bool     `json:"external"`
+	Icon         string   `json:"icon"`
+	Tags         []string `json:"tags"`
 }
 
 // -- Search Stock Locations --
@@ -32,8 +33,8 @@ type SearchLocationsInput struct {
 	Limit  int    `json:"limit,omitempty" jsonschema:"Maximum number of results (default 25)"`
 }
 
-func RegisterSearchLocations(server *mcp.Server, c *client.Client) {
-	mcp.AddTool(server, &mcp.Tool{
+func RegisterSearchLocations(server *mcp.Server, c *client.Client, r *coerce.Registry) {
+	coerce.AddTool(server, r, &mcp.Tool{
 		Name:        "search_stock_locations",
 		Description: "Search for stock locations by name or description. Use this to find locations when the user gives an approximate name (e.g., 'green box 2' or 'office'). Returns matching locations with their full path (e.g., 'Office/Green 1'). The pathstring field shows the hierarchical location path.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, input SearchLocationsInput) (*mcp.CallToolResult, any, error) {
@@ -59,8 +60,8 @@ type GetLocationInput struct {
 	ID int `json:"id" jsonschema:"The location ID (pk) to retrieve"`
 }
 
-func RegisterGetLocation(server *mcp.Server, c *client.Client) {
-	mcp.AddTool(server, &mcp.Tool{
+func RegisterGetLocation(server *mcp.Server, c *client.Client, r *coerce.Registry) {
+	coerce.AddTool(server, r, &mcp.Tool{
 		Name:        "get_stock_location",
 		Description: "Get detailed information about a specific stock location by its ID, including its parent path and number of items.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, input GetLocationInput) (*mcp.CallToolResult, any, error) {
@@ -81,8 +82,8 @@ type ListLocationsInput struct {
 	Offset int `json:"offset,omitempty" jsonschema:"Offset for pagination"`
 }
 
-func RegisterListLocations(server *mcp.Server, c *client.Client) {
-	mcp.AddTool(server, &mcp.Tool{
+func RegisterListLocations(server *mcp.Server, c *client.Client, r *coerce.Registry) {
+	coerce.AddTool(server, r, &mcp.Tool{
 		Name:        "list_stock_locations",
 		Description: "List all stock locations, optionally filtered by parent location. Returns the full location hierarchy with pathstrings. Use this to see all available locations and their structure.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, input ListLocationsInput) (*mcp.CallToolResult, any, error) {
@@ -115,8 +116,8 @@ type CreateLocationInput struct {
 	Structural  *bool  `json:"structural,omitempty" jsonschema:"If true, stock cannot be directly stored here (only in sub-locations)"`
 }
 
-func RegisterCreateLocation(server *mcp.Server, c *client.Client) {
-	mcp.AddTool(server, &mcp.Tool{
+func RegisterCreateLocation(server *mcp.Server, c *client.Client, r *coerce.Registry) {
+	coerce.AddTool(server, r, &mcp.Tool{
 		Name:        "create_stock_location",
 		Description: "Create a new stock location. Locations can be nested (e.g., Office > Green 1). Provide a parent ID to create a sub-location. Always search for existing locations first to avoid duplicates.",
 		Annotations: &mcp.ToolAnnotations{
@@ -153,8 +154,8 @@ type UpdateLocationInput struct {
 	Parent      int    `json:"parent,omitempty" jsonschema:"New parent location ID. 0 or omit to leave unchanged."`
 }
 
-func RegisterUpdateLocation(server *mcp.Server, c *client.Client) {
-	mcp.AddTool(server, &mcp.Tool{
+func RegisterUpdateLocation(server *mcp.Server, c *client.Client, r *coerce.Registry) {
+	coerce.AddTool(server, r, &mcp.Tool{
 		Name:        "update_stock_location",
 		Description: "Update an existing stock location's fields. Only provided fields are changed. Use this to rename locations, change descriptions, or move a location under a different parent.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, input UpdateLocationInput) (*mcp.CallToolResult, any, error) {
@@ -188,8 +189,8 @@ type DeleteLocationInput struct {
 	ID int `json:"id" jsonschema:"The location ID (pk) to delete"`
 }
 
-func RegisterDeleteLocation(server *mcp.Server, c *client.Client) {
-	mcp.AddTool(server, &mcp.Tool{
+func RegisterDeleteLocation(server *mcp.Server, c *client.Client, r *coerce.Registry) {
+	coerce.AddTool(server, r, &mcp.Tool{
 		Name:        "delete_stock_location",
 		Description: "Delete a stock location. This is destructive and cannot be undone. The location must be empty (no stock items or sub-locations).",
 		Annotations: &mcp.ToolAnnotations{

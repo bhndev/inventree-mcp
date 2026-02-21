@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/chrisbotelho/inventree-mcp/internal/client"
+	"github.com/chrisbotelho/inventree-mcp/internal/coerce"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -38,8 +39,8 @@ type GetStockInput struct {
 	Offset   int `json:"offset,omitempty" jsonschema:"Offset for pagination"`
 }
 
-func RegisterGetStock(server *mcp.Server, c *client.Client) {
-	mcp.AddTool(server, &mcp.Tool{
+func RegisterGetStock(server *mcp.Server, c *client.Client, r *coerce.Registry) {
+	coerce.AddTool(server, r, &mcp.Tool{
 		Name:        "get_stock",
 		Description: "List stock items, optionally filtered by part ID and/or location ID. Returns stock quantities, locations, and status for each item.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, input GetStockInput) (*mcp.CallToolResult, any, error) {
@@ -72,8 +73,8 @@ type GetStockItemInput struct {
 	ID int `json:"id" jsonschema:"The stock item ID (pk) to retrieve"`
 }
 
-func RegisterGetStockItem(server *mcp.Server, c *client.Client) {
-	mcp.AddTool(server, &mcp.Tool{
+func RegisterGetStockItem(server *mcp.Server, c *client.Client, r *coerce.Registry) {
+	coerce.AddTool(server, r, &mcp.Tool{
 		Name:        "get_stock_item",
 		Description: "Get detailed information about a specific stock item by its ID.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, input GetStockItemInput) (*mcp.CallToolResult, any, error) {
@@ -97,8 +98,8 @@ type AddStockInput struct {
 	Notes    string  `json:"notes,omitempty" jsonschema:"Notes about this stock item"`
 }
 
-func RegisterAddStock(server *mcp.Server, c *client.Client) {
-	mcp.AddTool(server, &mcp.Tool{
+func RegisterAddStock(server *mcp.Server, c *client.Client, r *coerce.Registry) {
+	coerce.AddTool(server, r, &mcp.Tool{
 		Name:        "add_stock",
 		Description: "Add stock by creating a new stock item. Requires a part ID and quantity. Optionally specify a location. Use search_parts to find the part ID and search_stock_locations to find the location ID first.",
 		Annotations: &mcp.ToolAnnotations{
@@ -146,8 +147,8 @@ type StockAdjustment struct {
 	Quantity float64 `json:"quantity" jsonschema:"Quantity to add (use stock_remove for subtraction)"`
 }
 
-func RegisterStockAdd(server *mcp.Server, c *client.Client) {
-	mcp.AddTool(server, &mcp.Tool{
+func RegisterStockAdd(server *mcp.Server, c *client.Client, r *coerce.Registry) {
+	coerce.AddTool(server, r, &mcp.Tool{
 		Name:        "stock_add_quantity",
 		Description: "Add quantity to existing stock items. Use this to increase stock levels without creating new stock entries. Provide the stock item PK (not part ID) and the quantity to add.",
 		Annotations: &mcp.ToolAnnotations{
@@ -169,8 +170,8 @@ func RegisterStockAdd(server *mcp.Server, c *client.Client) {
 	})
 }
 
-func RegisterStockRemove(server *mcp.Server, c *client.Client) {
-	mcp.AddTool(server, &mcp.Tool{
+func RegisterStockRemove(server *mcp.Server, c *client.Client, r *coerce.Registry) {
+	coerce.AddTool(server, r, &mcp.Tool{
 		Name:        "stock_remove_quantity",
 		Description: "Remove quantity from existing stock items. Provide the stock item PK (not part ID) and the quantity to remove.",
 		Annotations: &mcp.ToolAnnotations{
@@ -200,8 +201,8 @@ type TransferStockInput struct {
 	Notes    string            `json:"notes,omitempty" jsonschema:"Notes about this transfer"`
 }
 
-func RegisterStockTransfer(server *mcp.Server, c *client.Client) {
-	mcp.AddTool(server, &mcp.Tool{
+func RegisterStockTransfer(server *mcp.Server, c *client.Client, r *coerce.Registry) {
+	coerce.AddTool(server, r, &mcp.Tool{
 		Name:        "stock_transfer",
 		Description: "Transfer stock items to a different location. Moves the specified quantity of each stock item to the target location.",
 		Annotations: &mcp.ToolAnnotations{
@@ -230,8 +231,8 @@ type DeleteStockItemInput struct {
 	ID int `json:"id" jsonschema:"The stock item ID (pk) to delete"`
 }
 
-func RegisterDeleteStockItem(server *mcp.Server, c *client.Client) {
-	mcp.AddTool(server, &mcp.Tool{
+func RegisterDeleteStockItem(server *mcp.Server, c *client.Client, r *coerce.Registry) {
+	coerce.AddTool(server, r, &mcp.Tool{
 		Name:        "delete_stock_item",
 		Description: "Delete a stock item. This is destructive and cannot be undone.",
 		Annotations: &mcp.ToolAnnotations{

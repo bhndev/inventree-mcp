@@ -59,3 +59,16 @@ Handler signature uses typed input/output structs with `json`/`jsonschema` tags.
 ## Configuration
 
 The server expects `INVENTREE_URL` and `INVENTREE_TOKEN` environment variables (or equivalent config) to connect to an InvenTree instance.
+
+### Optional: Image Search
+
+To enable the `search_part_images` tool, set these additional environment variables:
+
+- `GOOGLE_API_KEY` — Google Cloud API key with Custom Search API enabled
+- `GOOGLE_CSE_ID` — Google Custom Search Engine ID (configured for image search)
+
+If not set, the server starts normally but `search_part_images` returns an informative error. The `set_part_image`, `create_part` (with `image_url`), and `update_part` (with `image_url`) tools work regardless — they only need a direct image URL.
+
+## Workflow Guidelines
+
+- **Part descriptions from part numbers:** When the user provides just a part number (e.g., "LM7805", "ESP32-S3-WROOM-1"), look up or infer what the part is and generate a short, descriptive description for it. Never leave the description blank or just repeat the part number.

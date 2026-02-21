@@ -6,23 +6,24 @@ import (
 	"net/url"
 
 	"github.com/chrisbotelho/inventree-mcp/internal/client"
+	"github.com/chrisbotelho/inventree-mcp/internal/coerce"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // PartCategory represents an InvenTree part category.
 type PartCategory struct {
-	PK              int      `json:"pk"`
-	Name            string   `json:"name"`
-	Description     string   `json:"description"`
-	Parent          *int     `json:"parent"`
-	PathString      string   `json:"pathstring"`
-	Level           int      `json:"level"`
-	PartCount       int      `json:"part_count"`
-	Subcategories   int      `json:"subcategories"`
-	Starred         bool     `json:"starred"`
-	Structural      bool     `json:"structural"`
-	Icon            string   `json:"icon"`
-	DefaultLocation *int     `json:"default_location"`
+	PK            int    `json:"pk"`
+	Name          string `json:"name"`
+	Description   string `json:"description"`
+	Parent        *int   `json:"parent"`
+	PathString    string `json:"pathstring"`
+	Level         int    `json:"level"`
+	PartCount     int    `json:"part_count"`
+	Subcategories int    `json:"subcategories"`
+	Starred       bool   `json:"starred"`
+	Structural    bool   `json:"structural"`
+	Icon          string `json:"icon"`
+	DefaultLocation *int `json:"default_location"`
 }
 
 // -- Search Part Categories --
@@ -32,8 +33,8 @@ type SearchCategoriesInput struct {
 	Limit  int    `json:"limit,omitempty" jsonschema:"Maximum number of results (default 25)"`
 }
 
-func RegisterSearchCategories(server *mcp.Server, c *client.Client) {
-	mcp.AddTool(server, &mcp.Tool{
+func RegisterSearchCategories(server *mcp.Server, c *client.Client, r *coerce.Registry) {
+	coerce.AddTool(server, r, &mcp.Tool{
 		Name:        "search_part_categories",
 		Description: "Search for part categories by name. Use this to find the right category when creating parts. Returns categories with their full path (e.g., 'Electronic Components/Resistors/Through Hole').",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, input SearchCategoriesInput) (*mcp.CallToolResult, any, error) {
@@ -61,8 +62,8 @@ type ListCategoriesInput struct {
 	Offset int `json:"offset,omitempty" jsonschema:"Offset for pagination"`
 }
 
-func RegisterListCategories(server *mcp.Server, c *client.Client) {
-	mcp.AddTool(server, &mcp.Tool{
+func RegisterListCategories(server *mcp.Server, c *client.Client, r *coerce.Registry) {
+	coerce.AddTool(server, r, &mcp.Tool{
 		Name:        "list_part_categories",
 		Description: "List all part categories, optionally filtered by parent category. Shows the category hierarchy with pathstrings and part counts.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, input ListCategoriesInput) (*mcp.CallToolResult, any, error) {
@@ -96,8 +97,8 @@ type CreateCategoryInput struct {
 	Structural      *bool  `json:"structural,omitempty" jsonschema:"If true, parts cannot be directly assigned to this category (only to sub-categories)"`
 }
 
-func RegisterCreateCategory(server *mcp.Server, c *client.Client) {
-	mcp.AddTool(server, &mcp.Tool{
+func RegisterCreateCategory(server *mcp.Server, c *client.Client, r *coerce.Registry) {
+	coerce.AddTool(server, r, &mcp.Tool{
 		Name:        "create_part_category",
 		Description: "Create a new part category. Categories organize parts into a hierarchy (e.g., Electronic Components > Resistors > Through Hole). Always search for existing categories first to avoid duplicates.",
 		Annotations: &mcp.ToolAnnotations{
@@ -138,8 +139,8 @@ type UpdateCategoryInput struct {
 	DefaultLocation int    `json:"default_location,omitempty" jsonschema:"New default stock location ID. 0 or omit to leave unchanged."`
 }
 
-func RegisterUpdateCategory(server *mcp.Server, c *client.Client) {
-	mcp.AddTool(server, &mcp.Tool{
+func RegisterUpdateCategory(server *mcp.Server, c *client.Client, r *coerce.Registry) {
+	coerce.AddTool(server, r, &mcp.Tool{
 		Name:        "update_part_category",
 		Description: "Update an existing part category's fields. Only provided fields are changed. Use this to rename categories, change descriptions, or move a category under a different parent.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, input UpdateCategoryInput) (*mcp.CallToolResult, any, error) {
@@ -176,8 +177,8 @@ type DeleteCategoryInput struct {
 	ID int `json:"id" jsonschema:"The category ID (pk) to delete"`
 }
 
-func RegisterDeleteCategory(server *mcp.Server, c *client.Client) {
-	mcp.AddTool(server, &mcp.Tool{
+func RegisterDeleteCategory(server *mcp.Server, c *client.Client, r *coerce.Registry) {
+	coerce.AddTool(server, r, &mcp.Tool{
 		Name:        "delete_part_category",
 		Description: "Delete a part category. The category must have no parts or sub-categories.",
 		Annotations: &mcp.ToolAnnotations{
