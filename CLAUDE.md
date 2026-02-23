@@ -16,6 +16,22 @@ go test ./...                            # run all tests
 go test ./internal/client/ -run TestGet  # run a single test
 ```
 
+## Release Process
+
+When asked to "build a release", "create a release", or "cut a release", follow these steps exactly:
+
+1. **Cross-compile all platform binaries from the repo root:**
+   ```bash
+   GOOS=linux   GOARCH=amd64 go build -o inventree-mcp-linux-amd64        ./cmd/inventree-mcp
+   GOOS=darwin  GOARCH=arm64 go build -o inventree-mcp-darwin-arm64        ./cmd/inventree-mcp
+   GOOS=darwin  GOARCH=amd64 go build -o inventree-mcp-darwin-amd64        ./cmd/inventree-mcp
+   GOOS=windows GOARCH=amd64 go build -o inventree-mcp-windows-amd64.exe   ./cmd/inventree-mcp
+   ```
+
+2. **Create a GitHub release** with `gh release create` attaching all four binaries. Use semver tags (v0.1.0, v0.2.0, etc.). Include a table mapping filenames to platforms and a summary of changes since the last release.
+
+3. **Do NOT commit binaries to the repo** — they are gitignored. Releases are the distribution mechanism.
+
 ## Architecture
 
 ```
