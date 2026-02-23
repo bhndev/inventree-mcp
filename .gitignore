@@ -1,5 +1,6 @@
-# Binaries (root only, not the cmd/ subdirectory)
+# Binaries
 /inventree-mcp
+/inventree-mcp-*
 *.exe
 *.dll
 *.so
