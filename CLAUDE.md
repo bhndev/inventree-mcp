@@ -88,3 +88,5 @@ If not set, the server starts normally but `search_part_images` returns an infor
 ## Workflow Guidelines
 
 - **Part descriptions from part numbers:** When the user provides just a part number (e.g., "LM7805", "ESP32-S3-WROOM-1"), look up or infer what the part is and generate a short, descriptive description for it. Never leave the description blank or just repeat the part number.
+
+- **Bulk import throttling:** When creating multiple parts, stock items, or other resources via the InvenTree API, limit parallel calls to **3-5 at a time** and add a brief delay (`sleep 1`) between batches. InvenTree's default SQLite backend uses file-level locking, and too many concurrent writes cause `OperationalError` 500s. Always retry failed calls from a batch before moving on.
