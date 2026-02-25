@@ -12,18 +12,20 @@ import (
 )
 
 // Client is an HTTP client for the InvenTree REST API.
+// Fields are unexported to prevent accidental exposure of credentials
+// in logs, fmt output, or JSON serialization.
 type Client struct {
-	BaseURL    string
-	Token      string
-	HTTPClient *http.Client
+	baseURL    string
+	token      string
+	httpClient *http.Client
 }
 
 // New creates a new InvenTree API client.
 func New(baseURL, token string) *Client {
 	return &Client{
-		BaseURL: strings.TrimRight(baseURL, "/"),
-		Token:   token,
-		HTTPClient: &http.Client{
+		baseURL: strings.TrimRight(baseURL, "/"),
+		token:   token,
+		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
 	}
@@ -35,7 +37,7 @@ func (c *Client) Do(method, path string, body io.Reader) (*http.Response, error)
 	// Split path from query string to avoid url.JoinPath encoding the '?'.
 	pathPart, query, _ := strings.Cut(path, "?")
 
-	u, err := url.JoinPath(c.BaseURL, pathPart)
+	u, err := url.JoinPath(c.baseURL, pathPart)
 	if err != nil {
 		return nil, fmt.Errorf("building URL: %w", err)
 	}
@@ -48,10 +50,10 @@ func (c *Client) Do(method, path string, body io.Reader) (*http.Response, error)
 		return nil, fmt.Errorf("creating request: %w", err)
 	}
 
-	req.Header.Set("Authorization", "Token "+c.Token)
+	req.Header.Set("Authorization", "Token "+c.token)
 	req.Header.Set("Content-Type", "application/json")
 
-	return c.HTTPClient.Do(req)
+	return c.httpClient.Do(req)
 }
 
 // Get performs a GET request and decodes the JSON response into dest.
