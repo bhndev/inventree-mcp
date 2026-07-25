@@ -56,6 +56,7 @@ internal/
   coerce/coerce.go          Type-coercion middleware + the AddTool wrapper
   imagesearch/google.go     Google Custom Search client (optional; may be nil)
   tools/                    One file per InvenTree resource domain, plus register.go
+    references.go           Shared next-reference generator for all four order types
 ```
 
 **Flow:** MCP client → stdio or HTTP → `mcp.Server` → coercion middleware → tool handler → `client.Client` → InvenTree REST API
@@ -100,7 +101,9 @@ Four things must line up, or the tool is broken or insecure:
 1. Write `RegisterXxx(server *mcp.Server, c *client.Client, r *coerce.Registry)` in the file for its resource domain.
 2. **Register with `coerce.AddTool`, never `mcp.AddTool` directly.** `coerce.AddTool` reflects over the input struct and records which JSON fields are integer/number/boolean, so the middleware can repair clients that send `"32"` instead of `32`. Registering via `mcp.AddTool` skips that and those clients get schema-validation failures.
 3. Add the `RegisterXxx` call to `RegisterAll` in `internal/tools/register.go` — the single wiring point.
-4. **Start the handler body with `c := callerClient(c, req)`.** This is security-critical, not boilerplate. In shared-token mode it returns the client unchanged; in OAuth mode it attaches the caller's credential. Omit it and the tool cannot make requests at all in OAuth mode (by design). All 37 handlers that talk to InvenTree do this; `search_part_images` is the one tool with no InvenTree client.
+4. **Start the handler body with `c := callerClient(c, req)`.** This is security-critical, not boilerplate. In shared-token mode it returns the client unchanged; in OAuth mode it attaches the caller's credential. Omit it and the tool cannot make requests at all in OAuth mode (by design). All 69 handlers that talk to InvenTree do this; `search_part_images` is the one tool with no InvenTree client.
+
+To check the invariant still holds after adding tools, compare the count of `coerce.AddTool` call sites against `c := callerClient` — the difference should be exactly one.
 
 ## Tool handler conventions
 
@@ -130,6 +133,11 @@ Four things must line up, or the tool is broken or insecure:
 - **Images attach by URL, not upload** — PATCH `remote_image` and InvenTree fetches it server-side.
 - **PO references are pattern-validated** (`PURCHASEORDER_REFERENCE_PATTERN`, default `PO-{ref:04d}`), so vendor strings are rejected; the vendor's own number goes in `supplier_reference`. `create_purchase_order` auto-generates a valid reference, which races under concurrent creates — pass explicit references for batch work.
 - **Stock cannot be received against a PENDING order**; issue it first.
+- **`/api/build/{id}/complete/` completes build OUTPUTS, `/finish/` completes the build ORDER.** They are different operations on different objects and the names invite exactly the wrong guess. `complete_build_outputs` and `finish_build_order` are named to keep the distinction visible to the model.
+- **Sales order stock is allocated into a *shipment*, not directly against a line.** `allocate_sales_order_stock` therefore requires a shipment ID, and stock only leaves inventory when the shipment is dispatched with `ship_sales_order_shipment` — allocation alone changes nothing. InvenTree usually auto-creates shipment 1 with a new order, so check `get_sales_order` before creating another.
+- **Line items reference a different object per order type.** PO lines take a *supplier* part, SO lines take an *internal* part, RO lines take a *stock item* (the specific unit coming back). Getting this wrong is the most common 400 in this area.
+- **All four order types have their own reference pattern setting** (`PURCHASEORDER_`/`SALESORDER_`/`RETURNORDER_`/`BUILDORDER_REFERENCE_PATTERN`). `nextReference` in `references.go` infers the prefix and zero-padding from existing records rather than hardcoding them; it races under concurrent creates, so pass explicit references for batch work.
+- **A build order must be cancelled before it can be deleted**, mirroring the deactivate-then-delete rule for parts.
 - **`&` is rejected as HTML** in names — `{"name":["Remove HTML tags from this value"]}`.
 - `client.Do` splits the query string off before `url.JoinPath` so `?` isn't percent-encoded.
 
@@ -290,3 +298,7 @@ The forwarding client's refusal to act without a caller credential is a security
 - **Bulk import throttling:** When creating multiple parts, stock items, or other resources via the InvenTree API, limit parallel calls to **3-5 at a time** and add a brief delay (`sleep 1`) between batches. InvenTree's default SQLite backend uses file-level locking, and too many concurrent writes cause `OperationalError` 500s. Always retry failed calls from a batch before moving on.
 
 - **Receiving ordered stock:** use `receive_purchase_order`, not `add_stock` — only the former keeps on-order quantities accurate.
+
+- **Building an assembly:** the order is `get_bom` (confirm the assembly has one) → `create_build_order` → `issue_build_order` → `auto_allocate_build_stock` or `allocate_build_stock` → `create_build_output` → `complete_build_outputs` → `finish_build_order`. Skipping allocation makes completion fail, which reads as an opaque 400.
+
+- **Verification status of the order/build/BOM tools:** the build order routes were confirmed against InvenTree's `build/api.py`. The sales order, return order and BOM routes were written from the documented API and have **not** been exercised against a live instance — run `internal/tools/tools_integration_test.go` with credentials before trusting them.
