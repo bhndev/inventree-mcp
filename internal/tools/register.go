@@ -48,5 +48,25 @@ func RegisterAll(server *mcp.Server, c *client.Client, imgClient *imagesearch.Cl
 	RegisterUpdateCategory(server, c, r)
 	RegisterDeleteCategory(server, c, r)
 
+	// Companies (suppliers / manufacturers)
+	RegisterSearchCompanies(server, c, r)
+	RegisterCreateCompany(server, c, r)
+
+	// Manufacturer parts (internal part <-> manufacturer MPN)
+	RegisterListManufacturerParts(server, c, r)
+	RegisterCreateManufacturerPart(server, c, r)
+
+	// Supplier parts (internal part <-> vendor SKU)
+	RegisterSearchSupplierParts(server, c, r)
+	RegisterCreateSupplierPart(server, c, r)
+
+	// Purchase orders
+	RegisterListPurchaseOrders(server, c, r)
+	RegisterGetPurchaseOrder(server, c, r)
+	RegisterCreatePurchaseOrder(server, c, r)
+	RegisterAddPurchaseOrderLine(server, c, r)
+	RegisterIssuePurchaseOrder(server, c, r)
+	RegisterReceivePurchaseOrder(server, c, r)
+
 	return r
 }
