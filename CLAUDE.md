@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-An MCP (Model Context Protocol) server in Go that exposes InvenTree inventory management API operations as MCP tools. Uses stdio transport for communication with MCP clients (e.g., Claude Code, Claude Desktop).
+An MCP (Model Context Protocol) server in Go that exposes InvenTree inventory management API operations as MCP tools. It runs either as a local stdio binary (the default, launched by Claude Desktop / Claude Code) or as a hosted HTTPS service that any Claude surface can connect to as a custom connector.
 
 Module path: `github.com/chrisbotelho/inventree-mcp`
 
@@ -12,19 +12,22 @@ Module path: `github.com/chrisbotelho/inventree-mcp`
 
 ```bash
 go build ./...                            # compile all packages
-go build -o inventree-mcp ./cmd/inventree-mcp
+make build                                # same, with version stamped in
 make install                              # build to ~/.local/bin/inventree-mcp
-go test ./...                             # integration tests skip without credentials
+make test                                 # go test ./...
+make docker                               # build the container image
 ```
 
-Tests in `internal/tools/tools_integration_test.go` hit a **live InvenTree instance** and `t.Skip` unless both env vars are set:
+`go test ./...` passing is **not** proof the server works. `internal/client` has real unit tests, but `internal/tools/tools_integration_test.go` hits a live InvenTree instance and `t.Skip`s unless credentials are set:
 
 ```bash
 INVENTREE_URL=http://... INVENTREE_TOKEN=... go test -v ./internal/tools/
 INVENTREE_URL=... INVENTREE_TOKEN=... go test ./internal/tools/ -run TestSearchParts
 ```
 
-After `make install`, quit and relaunch Claude Desktop — it only picks up the new binary on restart.
+After `make install`, quit and relaunch Claude Desktop — it only picks up the new binary on restart. In a container, `docker compose up -d --build inventree-mcp`.
+
+Version is stamped via `-ldflags "-X main.version=..."`; the Makefile derives it from `git describe`. `/healthz` reports the running version, so "is my fix deployed?" is answerable.
 
 ## Release Process
 
@@ -45,76 +48,123 @@ When asked to "build a release", "create a release", or "cut a release", follow 
 ## Architecture
 
 ```
-cmd/inventree-mcp/main.go   Entry point: config → client → server → RegisterAll → coercion middleware → stdio
+cmd/inventree-mcp/main.go   Entry point: config → client → server → RegisterAll → transport
 internal/
-  client/client.go          HTTP client for the InvenTree REST API (auth, Get/Post/Patch/Delete, error mapping)
-  config/config.go          Env-var configuration
-  coerce/coerce.go          Type-coercion middleware + the AddTool wrapper all tools register through
+  client/client.go          HTTP client for the InvenTree REST API
+  config/config.go          Env-var configuration and validation
+  auth/verify.go            OAuth bearer-token verification (resource server only)
+  coerce/coerce.go          Type-coercion middleware + the AddTool wrapper
   imagesearch/google.go     Google Custom Search client (optional; may be nil)
   tools/                    One file per InvenTree resource domain, plus register.go
 ```
 
-**Flow:** MCP client → stdio → `mcp.Server` → coercion middleware → tool handler → `client.Client` → InvenTree REST API
+**Flow:** MCP client → stdio or HTTP → `mcp.Server` → coercion middleware → tool handler → `client.Client` → InvenTree REST API
 
-### Adding a tool
+## Transports and authentication
 
-Three things must line up, or the tool silently won't work:
+Configuration is documented in `.env.example`, which is the reference for every variable. Three shapes:
 
-1. Write `RegisterXxx(server *mcp.Server, c *client.Client, r *coerce.Registry)` in the file for its resource domain (`parts.go`, `stock.go`, `purchase_orders.go`, …).
+| Shape | `MCP_TRANSPORT` | `MCP_AUTH_MODE` | InvenTree calls made as |
+|---|---|---|---|
+| Local stdio (default) | `stdio` | n/a | the `INVENTREE_TOKEN` user |
+| Hosted, shared secret | `http` | `token` | the `INVENTREE_TOKEN` user |
+| Hosted, per-user OAuth | `http` | `oauth` | **the end user who made the request** |
+
+stdio is the default so existing local configs keep working after any change here.
+
+### The forwarding model — read before touching tools or client
+
+In OAuth mode this server is an OAuth **resource server** only: it issues no tokens and runs no authorization endpoints. InvenTree's django-oauth-toolkit is the authorization server. Claude's custom connectors accept a pre-registered client ID/secret, so there is no Dynamic Client Registration to implement.
+
+Each MCP call carries the end user's own access token, and that token is forwarded to InvenTree, so **InvenTree applies that user's role permissions** rather than a service account's. Consequences:
+
+- `client.New` holds a fixed token and sends `Authorization: Token <t>`.
+- `client.NewForwarding` holds **no** credential. `WithCallerToken` derives a per-request copy that sends `Authorization: Bearer <t>`.
+- A forwarding client with no caller token **refuses to issue the request**. This is deliberate: a handler that forgets to derive one fails loudly instead of silently escalating to a credential with wider permissions than the user holds. Do not add a fallback.
+
+The caller's token is read from `req.Extra.Header`, **not** from `ctx`. The SDK attaches per-HTTP-request metadata to the JSON-RPC request (`streamable.go`: `jreq.Extra = &RequestExtra{TokenInfo, Header}`). Handler `ctx` derives from the session's original `initialize`, so a token taken from `ctx` would be frozen at connect time and go stale on refresh.
+
+### Token verification
+
+`internal/auth` offers two strategies, selected by `OAUTH_VERIFY`:
+
+- **`userinfo` (default)** — presents the token to the OIDC UserInfo endpoint. Needs no client credentials, and a 200 proves the exact property forwarding depends on: that InvenTree accepts the token as an API bearer credential. Reports no expiry or scopes, so `Expiration` is set to the cache horizon and InvenTree remains the authority.
+- **`introspect`** — RFC 7662. The only mode that reports a token's scopes, so the only one that can enforce them at this server. InvenTree does not advertise an introspection endpoint; confirm yours works before selecting it.
+
+Both cache results for 60s, clamped to the token's expiry, so a tool call does not put a request on InvenTree every time.
+
+## Adding a tool
+
+Four things must line up, or the tool is broken or insecure:
+
+1. Write `RegisterXxx(server *mcp.Server, c *client.Client, r *coerce.Registry)` in the file for its resource domain.
 2. **Register with `coerce.AddTool`, never `mcp.AddTool` directly.** `coerce.AddTool` reflects over the input struct and records which JSON fields are integer/number/boolean, so the middleware can repair clients that send `"32"` instead of `32`. Registering via `mcp.AddTool` skips that and those clients get schema-validation failures.
-3. Add the `RegisterXxx` call to `RegisterAll` in `internal/tools/register.go` — it is the single wiring point, and `main.go` installs the returned registry's middleware.
+3. Add the `RegisterXxx` call to `RegisterAll` in `internal/tools/register.go` — the single wiring point.
+4. **Start the handler body with `c := callerClient(c, req)`.** This is security-critical, not boilerplate. In shared-token mode it returns the client unchanged; in OAuth mode it attaches the caller's credential. Omit it and the tool cannot make requests at all in OAuth mode (by design). All 37 handlers that talk to InvenTree do this; `search_part_images` is the one tool with no InvenTree client.
 
-### Tool handler conventions
+## Tool handler conventions
 
 - Input structs use `json` + `jsonschema` tags; the `jsonschema` tag is the field's description shown to the model. Use `,omitempty` for optional fields and `*bool` where "unset" differs from `false`.
-- **Return API failures as `errResult(err)` with a `nil` Go error**, not as the handler's error return. That surfaces the message to the model as tool output instead of a protocol error. Signature: `return errResult(fmt.Errorf("...: %w", err)), nil, nil`.
-- Shared helpers `errResult`, `textResult`, `jsonResult`, `boolPtr` live at the bottom of `parts.go` and are used by every tool file.
+- **Return API failures as `errResult(err)` with a `nil` Go error**, not as the handler's error return. That surfaces the message to the model as tool output instead of a protocol error: `return errResult(fmt.Errorf("...: %w", err)), nil, nil`.
+- Shared helpers `callerClient`, `bearerToken`, `errResult`, `textResult`, `jsonResult`, `boolPtr` live at the bottom of `parts.go` and are used by every tool file.
 - Set `mcp.ToolAnnotations` — `ReadOnlyHint: true` for queries, `DestructiveHint` for writes.
 - Build payloads as `map[string]any`, conditionally adding keys, so omitted optional fields aren't sent as zero values that overwrite existing data.
 - Append `&format=json` to GET paths and decode lists into `client.PaginatedResponse[T]`.
-- Tool descriptions carry workflow guidance for the model (which tool to call first, ordering constraints, disambiguation rules). They are long on purpose — see `create_part` and `receive_purchase_order`.
+- Tool descriptions carry workflow guidance for the model (which tool to call first, ordering constraints). They are long on purpose — see `create_part` and `receive_purchase_order`.
 - Validate required IDs/quantities in the handler and, where a precondition is knowable, check it with a GET first so the user gets a clear message instead of a bare 400 (see `receive_purchase_order`'s PLACED-status check).
 
 ## InvenTree API
 
 - **Base URL pattern:** `{host}/api/`
-- **Auth:** `Authorization: Token <token>` header (get token via `GET /api/user/token/` with basic auth)
+- **Auth:** `Authorization: Token <token>` for API tokens, `Bearer <token>` for OAuth access tokens. Both are accepted by the REST API.
 - **Docs:** https://docs.inventree.org/en/1.1.x/api/ and interactive schema at `{host}/api-doc/`
-- **Key resource endpoints:**
-  - `/api/part/` - Parts and categories
-  - `/api/stock/` - Stock items and locations
-  - `/api/build/` - Build/manufacturing orders
-  - `/api/order/po/` - Purchase orders
-  - `/api/order/so/` - Sales orders
-  - `/api/order/ro/` - Return orders
-  - `/api/bom/` - Bill of materials
-  - `/api/company/` - Companies, suppliers, manufacturers
+- **Key resource endpoints:** `/api/part/`, `/api/stock/`, `/api/build/`, `/api/order/po/`, `/api/order/so/`, `/api/order/ro/`, `/api/bom/`, `/api/company/`
 - All resources support standard CRUD. Many support `/metadata/` sub-endpoints and bulk operations.
 - Pagination is Django REST Framework style.
 
 ### API quirks encoded in this codebase
 
+- **Money fields are numbers, not strings** (`total_price: 0`, `purchase_price: 141.82`). A `*string` field fails to decode. Type only what the code needs internally and leave the rest untyped — see `poSummary` in `purchase_orders.go`.
+- **`/api/order/po/{id}/receive/` returns an ARRAY**, not an object. Decode into `any`.
 - **Parts must be deactivated before deletion** — `delete_part` PATCHes `active: false` first.
-- **Images are attached by URL, not upload** — PATCH `remote_image` and InvenTree fetches it server-side.
-- **Purchase orders follow PENDING → PLACED → received.** `/api/order/po/{id}/receive/` rejects non-PLACED orders, and it returns an *array* while most endpoints return an object — decode into `any`.
+- **Images attach by URL, not upload** — PATCH `remote_image` and InvenTree fetches it server-side.
+- **PO references are pattern-validated** (`PURCHASEORDER_REFERENCE_PATTERN`, default `PO-{ref:04d}`), so vendor strings are rejected; the vendor's own number goes in `supplier_reference`. `create_purchase_order` auto-generates a valid reference, which races under concurrent creates — pass explicit references for batch work.
+- **Stock cannot be received against a PENDING order**; issue it first.
+- **`&` is rejected as HTML** in names — `{"name":["Remove HTML tags from this value"]}`.
 - `client.Do` splits the query string off before `url.JoinPath` so `?` isn't percent-encoded.
+
+### InvenTree OAuth findings
+
+Measured against a live 1.4 instance. Re-verify before relying on any of it.
+
+- OAuth2/OIDC is **experimental and off by default**; enable with `INVENTREE_FLAGS={"OIDC": [{"condition": "boolean", "value": true}]}`.
+- Discovery lives at `{host}/o/.well-known/openid-configuration`; the issuer is `{host}/o`. The RFC 8414 path (`/.well-known/oauth-authorization-server/...`) 404s, but Claude accepts OIDC Discovery 1.0.
+- **No `registration_endpoint` and no CIMD**, so DCR is unavailable — a pre-registered client ID/secret is the only option. `token_endpoint_auth_methods_supported` lacks `none`, so the client must be **confidential**.
+- The application must have an **OIDC algorithm** (e.g. RS256) selected, or the `openid` scope is unavailable and UserInfo verification fails.
+- Refresh tokens **are** issued even though `offline_access` is absent from `scopes_supported`.
+- **Scopes were not observed to be enforced** by the API: a token granted only `openid g:read r:view:part` still read `/api/order/po/`. That test ran as a superuser, so it does not distinguish superuser bypass from no gating at all. Until settled, treat the connected user's **role permissions** as the real control, and do not connect Claude as a superuser.
+
+## SDK details worth knowing
+
+Uses `github.com/modelcontextprotocol/go-sdk`. Three behaviours that cost time to discover:
+
+- `auth.RequireBearerToken` **rejects a `TokenInfo` with a zero `Expiration`**, so any verifier must populate it.
+- It interpolates `ResourceMetadataURL` into `WWW-Authenticate` **without quoting**, so the value is pre-quoted with `strconv.Quote` to emit the RFC 9728 form.
+- Per-request auth data arrives on `req.Extra`, not `ctx` (see the forwarding model above).
+
+The MCP endpoint is served at **`/mcp`** (the bare origin also routes there). That path is part of the OAuth resource identifier advertised in the protected resource metadata, so changing it changes what must be typed into Claude.
 
 ## Configuration
 
-The server expects `INVENTREE_URL` and `INVENTREE_TOKEN` environment variables to connect to an InvenTree instance.
+See `.env.example` for every variable and the three deployment shapes. Real env files are gitignored (`.env`, `.env.*`, `*.env`); never commit one.
 
-### Optional: Image Search
-
-To enable the `search_part_images` tool, set these additional environment variables:
-
-- `GOOGLE_API_KEY` — Google Cloud API key with Custom Search API enabled
-- `GOOGLE_CSE_ID` — Google Custom Search Engine ID (configured for image search)
-
-If not set, the server starts normally but `search_part_images` returns an informative error. The `set_part_image`, `create_part` (with `image_url`), and `update_part` (with `image_url`) tools work regardless — they only need a direct image URL.
+`config.Load` reads environment variables only and refuses to start on an incomplete configuration — notably it will not open an HTTP listener without a credential configured.
 
 ## Credential Safety
 
-`client.Client`'s fields are deliberately unexported so the token can't leak via `fmt` output, logs, or JSON serialization, and `sanitizeError` redacts `Token ...` substrings from network errors. Keep both properties when touching `internal/client/`.
+`client.Client`'s fields are deliberately unexported so tokens can't leak via `fmt` output, logs, or JSON serialization, and `sanitizeError` redacts `Token ...` substrings from network errors. Keep both properties when touching `internal/client/`.
+
+The forwarding client's refusal to act without a caller credential is a security property, not an inconvenience — see "The forwarding model" above.
 
 ## Workflow Guidelines
 
