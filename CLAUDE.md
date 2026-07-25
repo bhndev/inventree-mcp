@@ -155,15 +155,94 @@ Applies when running behind a reverse proxy as a custom connector.
 curl -s https://mcp.example.com/.well-known/oauth-protected-resource
 ```
 
-**Reverse proxy requirements:**
+### Compose, alongside an existing InvenTree stack
 
-- Do **not** block or 404 `/.well-known/*` on the MCP host. That is where the protected resource metadata lives, and blocking it breaks OAuth entirely. Some InvenTree proxy configs 404 those paths to stop probes falling through to the HTML catch-all — that rule belongs on the InvenTree host, never on this one.
-- Streamable HTTP holds long-lived SSE responses open, so response buffering must be off. In Caddy: `reverse_proxy inventree-mcp:8000 { flush_interval -1 }`.
-- If the authorization server sits behind the same proxy, serve its discovery document at the RFC 8414 path too. InvenTree only publishes OIDC discovery at `/o/.well-known/openid-configuration`; a client looking in the RFC 8414 location (`/.well-known/oauth-authorization-server/o`) gets nothing. An internal rewrite to the OIDC document satisfies both, and the `issuer` inside it validates either way.
+Add the service in a **`docker-compose.override.yml`** next to InvenTree's own compose file. Compose merges it automatically, InvenTree's file stays untouched by upgrades, and the container joins the same project network — which is what lets the proxy reach it by name.
 
-**Alongside an existing stack:** add the service in a `docker-compose.override.yml` rather than editing a vendored `docker-compose.yml`, which upgrades can overwrite. Use `expose`, not `ports` — the proxy owns the public interface. `depends_on` is unnecessary: this server opens no connection to InvenTree until a request arrives.
+```yaml
+services:
+  inventree-mcp:
+    build:
+      context: /root/inventree-mcp     # a clone of this repo
+      args:
+        VERSION: ${MCP_VERSION:-dev}
+    image: inventree-mcp:local
+    container_name: inventree-mcp
+    restart: unless-stopped
+    env_file:
+      - mcp.env                        # chmod 600; see .env.example
+    expose:
+      - "8000"
+```
 
-**Never paste `docker compose config` output.** It renders every resolved environment variable, including admin passwords and API tokens from neighbouring services.
+Deliberate omissions:
+
+- **No `ports:`** — `expose` only. The proxy owns the public interface; publishing a host port would put the endpoint on the public interface directly.
+- **No `depends_on:`** — this server opens no connection to InvenTree until a request arrives, so ordering buys nothing. It also avoids a trap: `depends_on` takes a *service* name, which is not necessarily the `container_name` shown by `docker ps`.
+
+Verify the merge before starting anything — if the service is absent, the override filename or location is wrong:
+
+```bash
+docker compose config | awk '/^  inventree-mcp:/,/^  [a-z-]+:$/' | grep -vi 'password\|secret\|token'
+```
+
+**Never paste raw `docker compose config` output anywhere.** It renders every resolved environment variable, including admin passwords and API tokens belonging to neighbouring services. Filter it, as above.
+
+### Reverse proxy (Caddy)
+
+A new site block for the MCP host:
+
+```caddy
+mcp.example.com {
+        log {
+                output file /var/log/caddy/inventree-mcp.access.log
+        }
+
+        # Streamable HTTP holds long-lived SSE responses open. Disable
+        # response buffering so events reach the client as produced.
+        reverse_proxy inventree-mcp:8000 {
+                flush_interval -1
+        }
+}
+```
+
+Note what is **absent**: no `/.well-known/*` handling. That is where the protected resource metadata lives, and blocking it breaks OAuth entirely. An InvenTree proxy config may legitimately 404 those paths to stop probes falling through to its HTML catch-all — that rule belongs on the InvenTree host, never on this one.
+
+On the **InvenTree** site block, two adjustments help clients discover the authorization server:
+
+```caddy
+inventree.example.com {
+        # ... existing log / request_body / encode / static / media ...
+
+        # RFC 8414 discovery. InvenTree publishes OIDC discovery only at
+        # /o/.well-known/openid-configuration, so serve that same document
+        # here for clients that look in the RFC 8414 location instead.
+        handle /.well-known/oauth-authorization-server* {
+                rewrite * /o/.well-known/openid-configuration
+                reverse_proxy {$INVENTREE_SERVER:"http://inventree-server:8000"}
+        }
+
+        # This host is not an MCP server. Answer cleanly rather than letting
+        # probes fall through to InvenTree's HTML catch-all.
+        handle /.well-known/oauth-protected-resource* {
+                respond 404
+        }
+
+        handle {
+                reverse_proxy {$INVENTREE_SERVER:"http://inventree-server:8000"}
+        }
+}
+```
+
+The rewrite matters because a bare `respond 404` on `oauth-authorization-server*` also swallows the path-suffixed form (`/.well-known/oauth-authorization-server/o`), which is exactly where an RFC 8414 client looks. Serving the OIDC document there satisfies both conventions; the `issuer` inside it validates either way.
+
+Add the DNS record for the MCP host **before** reloading, or the ACME challenge for the new block cannot complete. Apply with:
+
+```bash
+docker compose up -d --force-recreate inventree-proxy
+```
+
+`--force-recreate`, not `caddy reload`: the Caddyfile is typically a single-file bind mount, and an editor that writes-and-renames leaves the container holding the old inode, so a reload silently re-reads stale content.
 
 ## When OAuth fails
 
