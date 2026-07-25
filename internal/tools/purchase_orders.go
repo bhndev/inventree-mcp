@@ -4,8 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net/url"
-	"regexp"
-	"strconv"
 
 	"github.com/chrisbotelho/inventree-mcp/internal/client"
 	"github.com/chrisbotelho/inventree-mcp/internal/coerce"
@@ -31,39 +29,6 @@ type poSummary struct {
 	Reference  string `json:"reference"`
 	Status     int    `json:"status"`
 	StatusText string `json:"status_text"`
-}
-
-// referenceSuffix splits a reference like "PO-0007" into ("PO-", 7, 4).
-var referenceSuffix = regexp.MustCompile(`^(.*?)(\d+)$`)
-
-// nextReference picks the next unused order reference.
-//
-// InvenTree validates `reference` against PURCHASEORDER_REFERENCE_PATTERN
-// (default "PO-{ref:04d}"), so a free-form vendor string such as
-// "SO 100601233" is rejected outright. Rather than require the caller to
-// know the pattern, infer it from existing orders and continue the series.
-// Vendor order numbers belong in supplier_reference instead.
-func nextReference(c *client.Client) (string, error) {
-	var resp client.PaginatedResponse[poSummary]
-	if err := c.Get("/api/order/po/?limit=500&format=json", &resp); err != nil {
-		return "", fmt.Errorf("reading existing orders: %w", err)
-	}
-
-	prefix, width, highest := "PO-", 4, 0
-	for _, po := range resp.Results {
-		m := referenceSuffix.FindStringSubmatch(po.Reference)
-		if m == nil {
-			continue
-		}
-		n, err := strconv.Atoi(m[2])
-		if err != nil {
-			continue
-		}
-		if n > highest {
-			prefix, width, highest = m[1], len(m[2]), n
-		}
-	}
-	return fmt.Sprintf("%s%0*d", prefix, width, highest+1), nil
 }
 
 // -- List Purchase Orders --
@@ -174,7 +139,7 @@ func RegisterCreatePurchaseOrder(server *mcp.Server, c *client.Client, r *coerce
 
 		reference := input.Reference
 		if reference == "" {
-			generated, err := nextReference(c)
+			generated, err := nextReference(c, "/api/order/po/", "PO-")
 			if err != nil {
 				return errResult(err), nil, nil
 			}

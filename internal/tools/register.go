@@ -68,5 +68,17 @@ func RegisterAll(server *mcp.Server, c *client.Client, imgClient *imagesearch.Cl
 	RegisterIssuePurchaseOrder(server, c, r)
 	RegisterReceivePurchaseOrder(server, c, r)
 
+	// Build orders (manufacturing an assembly from its BOM)
+	RegisterListBuildOrders(server, c, r)
+	RegisterGetBuildOrder(server, c, r)
+	RegisterCreateBuildOrder(server, c, r)
+	RegisterIssueBuildOrder(server, c, r)
+	RegisterAllocateBuildStock(server, c, r)
+	RegisterAutoAllocateBuildStock(server, c, r)
+	RegisterCreateBuildOutput(server, c, r)
+	RegisterCompleteBuildOutputs(server, c, r)
+	RegisterFinishBuildOrder(server, c, r)
+	RegisterCancelBuildOrder(server, c, r)
+
 	return r
 }
