@@ -81,6 +81,7 @@ func RegisterListPurchaseOrders(server *mcp.Server, c *client.Client, r *coerce.
 		Name:        "list_purchase_orders",
 		Description: "List purchase orders, optionally filtered by supplier, status, or outstanding state. Use this to find an order ID before adding lines or receiving stock.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, input ListPurchaseOrdersInput) (*mcp.CallToolResult, any, error) {
+		c := callerClient(c, req)
 		limit := input.Limit
 		if limit <= 0 {
 			limit = 50
@@ -121,6 +122,7 @@ func RegisterGetPurchaseOrder(server *mcp.Server, c *client.Client, r *coerce.Re
 		Name:        "get_purchase_order",
 		Description: "Get a purchase order with all of its line items, including ordered and received quantities per line. Use this to see what is still outstanding before receiving a shipment.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, input GetPurchaseOrderInput) (*mcp.CallToolResult, any, error) {
+		c := callerClient(c, req)
 		if input.ID == 0 {
 			return errResult(fmt.Errorf("id is required")), nil, nil
 		}
@@ -165,6 +167,7 @@ func RegisterCreatePurchaseOrder(server *mcp.Server, c *client.Client, r *coerce
 			DestructiveHint: boolPtr(false),
 		},
 	}, func(ctx context.Context, req *mcp.CallToolRequest, input CreatePurchaseOrderInput) (*mcp.CallToolResult, any, error) {
+		c := callerClient(c, req)
 		if input.Supplier == 0 {
 			return errResult(fmt.Errorf("supplier is required")), nil, nil
 		}
@@ -230,6 +233,7 @@ func RegisterAddPurchaseOrderLine(server *mcp.Server, c *client.Client, r *coerc
 			DestructiveHint: boolPtr(false),
 		},
 	}, func(ctx context.Context, req *mcp.CallToolRequest, input AddPurchaseOrderLineInput) (*mcp.CallToolResult, any, error) {
+		c := callerClient(c, req)
 		if input.Order == 0 || input.SupplierPart == 0 {
 			return errResult(fmt.Errorf("order and supplier_part are required")), nil, nil
 		}
@@ -287,6 +291,7 @@ func RegisterIssuePurchaseOrder(server *mcp.Server, c *client.Client, r *coerce.
 			DestructiveHint: boolPtr(false),
 		},
 	}, func(ctx context.Context, req *mcp.CallToolRequest, input IssuePurchaseOrderInput) (*mcp.CallToolResult, any, error) {
+		c := callerClient(c, req)
 		if input.ID == 0 {
 			return errResult(fmt.Errorf("id is required")), nil, nil
 		}
@@ -329,6 +334,7 @@ func RegisterReceivePurchaseOrder(server *mcp.Server, c *client.Client, r *coerc
 			DestructiveHint: boolPtr(false),
 		},
 	}, func(ctx context.Context, req *mcp.CallToolRequest, input ReceivePurchaseOrderInput) (*mcp.CallToolResult, any, error) {
+		c := callerClient(c, req)
 		if input.Order == 0 {
 			return errResult(fmt.Errorf("order is required")), nil, nil
 		}

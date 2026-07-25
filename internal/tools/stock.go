@@ -44,6 +44,7 @@ func RegisterGetStock(server *mcp.Server, c *client.Client, r *coerce.Registry) 
 		Name:        "get_stock",
 		Description: "List stock items, optionally filtered by part ID and/or location ID. Returns stock quantities, locations, and status for each item.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, input GetStockInput) (*mcp.CallToolResult, any, error) {
+		c := callerClient(c, req)
 		limit := input.Limit
 		if limit <= 0 {
 			limit = 50
@@ -78,6 +79,7 @@ func RegisterGetStockItem(server *mcp.Server, c *client.Client, r *coerce.Regist
 		Name:        "get_stock_item",
 		Description: "Get detailed information about a specific stock item by its ID.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, input GetStockItemInput) (*mcp.CallToolResult, any, error) {
+		c := callerClient(c, req)
 		path := fmt.Sprintf("/api/stock/%d/?format=json", input.ID)
 		var item StockItem
 		if err := c.Get(path, &item); err != nil {
@@ -106,6 +108,7 @@ func RegisterAddStock(server *mcp.Server, c *client.Client, r *coerce.Registry) 
 			DestructiveHint: boolPtr(false),
 		},
 	}, func(ctx context.Context, req *mcp.CallToolRequest, input AddStockInput) (*mcp.CallToolResult, any, error) {
+		c := callerClient(c, req)
 		payload := map[string]any{
 			"part":     input.Part,
 			"quantity": input.Quantity,
@@ -155,6 +158,7 @@ func RegisterStockAdd(server *mcp.Server, c *client.Client, r *coerce.Registry) 
 			DestructiveHint: boolPtr(false),
 		},
 	}, func(ctx context.Context, req *mcp.CallToolRequest, input UpdateStockQuantityInput) (*mcp.CallToolResult, any, error) {
+		c := callerClient(c, req)
 		payload := map[string]any{
 			"items": input.Items,
 		}
@@ -178,6 +182,7 @@ func RegisterStockRemove(server *mcp.Server, c *client.Client, r *coerce.Registr
 			DestructiveHint: boolPtr(true),
 		},
 	}, func(ctx context.Context, req *mcp.CallToolRequest, input UpdateStockQuantityInput) (*mcp.CallToolResult, any, error) {
+		c := callerClient(c, req)
 		payload := map[string]any{
 			"items": input.Items,
 		}
@@ -209,6 +214,7 @@ func RegisterStockTransfer(server *mcp.Server, c *client.Client, r *coerce.Regis
 			DestructiveHint: boolPtr(false),
 		},
 	}, func(ctx context.Context, req *mcp.CallToolRequest, input TransferStockInput) (*mcp.CallToolResult, any, error) {
+		c := callerClient(c, req)
 		payload := map[string]any{
 			"items":    input.Items,
 			"location": input.Location,
@@ -239,6 +245,7 @@ func RegisterDeleteStockItem(server *mcp.Server, c *client.Client, r *coerce.Reg
 			DestructiveHint: boolPtr(true),
 		},
 	}, func(ctx context.Context, req *mcp.CallToolRequest, input DeleteStockItemInput) (*mcp.CallToolResult, any, error) {
+		c := callerClient(c, req)
 		path := fmt.Sprintf("/api/stock/%d/", input.ID)
 		if err := c.Delete(path); err != nil {
 			return errResult(fmt.Errorf("deleting stock item %d: %w", input.ID, err)), nil, nil

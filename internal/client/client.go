@@ -15,25 +15,71 @@ import (
 // Fields are unexported to prevent accidental exposure of credentials
 // in logs, fmt output, or JSON serialization.
 type Client struct {
-	baseURL    string
-	token      string
+	baseURL string
+	token   string
+	// scheme is the Authorization scheme paired with token: "Token" for an
+	// InvenTree API token, "Bearer" for a forwarded OAuth access token.
+	scheme     string
 	httpClient *http.Client
+	// requiresCaller marks a client that holds no usable credential of its own.
+	// It refuses to issue requests, so a tool that forgets to derive a
+	// per-caller client fails loudly instead of quietly acting as a shared
+	// service account with wider permissions than the user has.
+	requiresCaller bool
 }
 
-// New creates a new InvenTree API client.
+// New creates a client that authenticates with a fixed InvenTree API token.
+// Every request it makes is attributed to that token's user.
 func New(baseURL, token string) *Client {
 	return &Client{
 		baseURL: strings.TrimRight(baseURL, "/"),
 		token:   token,
+		scheme:  "Token",
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
 	}
 }
 
+// NewForwarding creates a client that carries no credential. Callers must
+// derive a usable client per request with [Client.WithCallerToken], so each
+// InvenTree call is attributed to the end user who triggered it and InvenTree's
+// own role permissions apply to them rather than to a shared account.
+func NewForwarding(baseURL string) *Client {
+	return &Client{
+		baseURL:        strings.TrimRight(baseURL, "/"),
+		requiresCaller: true,
+		httpClient: &http.Client{
+			Timeout: 30 * time.Second,
+		},
+	}
+}
+
+// RequiresCaller reports whether this client needs a per-request credential.
+func (c *Client) RequiresCaller() bool { return c.requiresCaller }
+
+// WithCallerToken returns a copy of c that authenticates as the end user with
+// the given OAuth access token. The underlying HTTP client is shared, so
+// deriving a client per request is cheap.
+func (c *Client) WithCallerToken(token string) *Client {
+	derived := *c
+	derived.token = token
+	derived.scheme = "Bearer"
+	derived.requiresCaller = false
+	return &derived
+}
+
 // Do executes an HTTP request against the InvenTree API with authentication.
 // The path may include query parameters (e.g., "/api/part/?search=foo").
 func (c *Client) Do(method, path string, body io.Reader) (*http.Response, error) {
+	if c.requiresCaller {
+		// Reaching here means a tool handler skipped deriving a per-caller
+		// client. Refuse rather than fall back to any wider credential.
+		return nil, fmt.Errorf("no caller credential for this request: " +
+			"the server is configured to act as the requesting user, but this " +
+			"tool did not supply their token")
+	}
+
 	// Split path from query string to avoid url.JoinPath encoding the '?'.
 	pathPart, query, _ := strings.Cut(path, "?")
 
@@ -50,7 +96,7 @@ func (c *Client) Do(method, path string, body io.Reader) (*http.Response, error)
 		return nil, fmt.Errorf("creating %s request for %s: %w", method, pathPart, err)
 	}
 
-	req.Header.Set("Authorization", "Token "+c.token)
+	req.Header.Set("Authorization", c.scheme+" "+c.token)
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := c.httpClient.Do(req)

@@ -80,11 +80,6 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("INVENTREE_URL environment variable is required")
 	}
 
-	token := os.Getenv("INVENTREE_TOKEN")
-	if token == "" {
-		return nil, fmt.Errorf("INVENTREE_TOKEN environment variable is required")
-	}
-
 	transport, err := loadTransport()
 	if err != nil {
 		return nil, err
@@ -96,7 +91,7 @@ func Load() (*Config, error) {
 
 	cfg := &Config{
 		URL:                   url,
-		Token:                 token,
+		Token:                 os.Getenv("INVENTREE_TOKEN"),
 		Transport:             transport,
 		Host:                  envOr("MCP_HOST", "127.0.0.1"),
 		Port:                  envOr("MCP_PORT", "8000"),
@@ -117,7 +112,20 @@ func Load() (*Config, error) {
 			return nil, err
 		}
 	}
+	// A service-account token is only needed when this server calls InvenTree on
+	// its own behalf. When it forwards each caller's own token, requiring one
+	// would mean provisioning a credential that is never used.
+	if !cfg.ForwardsCallerCredentials() && cfg.Token == "" {
+		return nil, fmt.Errorf("INVENTREE_TOKEN environment variable is required")
+	}
 	return cfg, nil
+}
+
+// ForwardsCallerCredentials reports whether InvenTree calls are attributed to
+// the end user who made the MCP request rather than to a shared service
+// account. This is the case exactly when per-user OAuth tokens are verified.
+func (c *Config) ForwardsCallerCredentials() bool {
+	return c.Transport == TransportHTTP && c.AuthMode == AuthOAuth
 }
 
 // validateHTTP enforces that a network listener is never started without a

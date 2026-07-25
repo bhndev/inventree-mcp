@@ -38,6 +38,7 @@ func RegisterSearchLocations(server *mcp.Server, c *client.Client, r *coerce.Reg
 		Name:        "search_stock_locations",
 		Description: "Search for stock locations by name or description. Use this to find locations when the user gives an approximate name (e.g., 'green box 2' or 'office'). Returns matching locations with their full path (e.g., 'Office/Green 1'). The pathstring field shows the hierarchical location path.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, input SearchLocationsInput) (*mcp.CallToolResult, any, error) {
+		c := callerClient(c, req)
 		limit := input.Limit
 		if limit <= 0 {
 			limit = 25
@@ -65,6 +66,7 @@ func RegisterGetLocation(server *mcp.Server, c *client.Client, r *coerce.Registr
 		Name:        "get_stock_location",
 		Description: "Get detailed information about a specific stock location by its ID, including its parent path and number of items.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, input GetLocationInput) (*mcp.CallToolResult, any, error) {
+		c := callerClient(c, req)
 		path := fmt.Sprintf("/api/stock/location/%d/?format=json", input.ID)
 		var loc StockLocation
 		if err := c.Get(path, &loc); err != nil {
@@ -87,6 +89,7 @@ func RegisterListLocations(server *mcp.Server, c *client.Client, r *coerce.Regis
 		Name:        "list_stock_locations",
 		Description: "List all stock locations, optionally filtered by parent location. Returns the full location hierarchy with pathstrings. Use this to see all available locations and their structure.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, input ListLocationsInput) (*mcp.CallToolResult, any, error) {
+		c := callerClient(c, req)
 		limit := input.Limit
 		if limit <= 0 {
 			limit = 100
@@ -124,6 +127,7 @@ func RegisterCreateLocation(server *mcp.Server, c *client.Client, r *coerce.Regi
 			DestructiveHint: boolPtr(false),
 		},
 	}, func(ctx context.Context, req *mcp.CallToolRequest, input CreateLocationInput) (*mcp.CallToolResult, any, error) {
+		c := callerClient(c, req)
 		payload := map[string]any{
 			"name": input.Name,
 		}
@@ -159,6 +163,7 @@ func RegisterUpdateLocation(server *mcp.Server, c *client.Client, r *coerce.Regi
 		Name:        "update_stock_location",
 		Description: "Update an existing stock location's fields. Only provided fields are changed. Use this to rename locations, change descriptions, or move a location under a different parent.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, input UpdateLocationInput) (*mcp.CallToolResult, any, error) {
+		c := callerClient(c, req)
 		payload := map[string]any{}
 		if input.Name != "" {
 			payload["name"] = input.Name
@@ -197,6 +202,7 @@ func RegisterDeleteLocation(server *mcp.Server, c *client.Client, r *coerce.Regi
 			DestructiveHint: boolPtr(true),
 		},
 	}, func(ctx context.Context, req *mcp.CallToolRequest, input DeleteLocationInput) (*mcp.CallToolResult, any, error) {
+		c := callerClient(c, req)
 		path := fmt.Sprintf("/api/stock/location/%d/", input.ID)
 		if err := c.Delete(path); err != nil {
 			return errResult(fmt.Errorf("deleting location %d: %w", input.ID, err)), nil, nil

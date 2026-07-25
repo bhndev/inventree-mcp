@@ -38,6 +38,7 @@ func RegisterSearchCategories(server *mcp.Server, c *client.Client, r *coerce.Re
 		Name:        "search_part_categories",
 		Description: "Search for part categories by name. Use this to find the right category when creating parts. Returns categories with their full path (e.g., 'Electronic Components/Resistors/Through Hole').",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, input SearchCategoriesInput) (*mcp.CallToolResult, any, error) {
+		c := callerClient(c, req)
 		limit := input.Limit
 		if limit <= 0 {
 			limit = 25
@@ -67,6 +68,7 @@ func RegisterListCategories(server *mcp.Server, c *client.Client, r *coerce.Regi
 		Name:        "list_part_categories",
 		Description: "List all part categories, optionally filtered by parent category. Shows the category hierarchy with pathstrings and part counts.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, input ListCategoriesInput) (*mcp.CallToolResult, any, error) {
+		c := callerClient(c, req)
 		limit := input.Limit
 		if limit <= 0 {
 			limit = 100
@@ -105,6 +107,7 @@ func RegisterCreateCategory(server *mcp.Server, c *client.Client, r *coerce.Regi
 			DestructiveHint: boolPtr(false),
 		},
 	}, func(ctx context.Context, req *mcp.CallToolRequest, input CreateCategoryInput) (*mcp.CallToolResult, any, error) {
+		c := callerClient(c, req)
 		payload := map[string]any{
 			"name": input.Name,
 		}
@@ -144,6 +147,7 @@ func RegisterUpdateCategory(server *mcp.Server, c *client.Client, r *coerce.Regi
 		Name:        "update_part_category",
 		Description: "Update an existing part category's fields. Only provided fields are changed. Use this to rename categories, change descriptions, or move a category under a different parent.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, input UpdateCategoryInput) (*mcp.CallToolResult, any, error) {
+		c := callerClient(c, req)
 		payload := map[string]any{}
 		if input.Name != "" {
 			payload["name"] = input.Name
@@ -185,6 +189,7 @@ func RegisterDeleteCategory(server *mcp.Server, c *client.Client, r *coerce.Regi
 			DestructiveHint: boolPtr(true),
 		},
 	}, func(ctx context.Context, req *mcp.CallToolRequest, input DeleteCategoryInput) (*mcp.CallToolResult, any, error) {
+		c := callerClient(c, req)
 		path := fmt.Sprintf("/api/part/category/%d/", input.ID)
 		if err := c.Delete(path); err != nil {
 			return errResult(fmt.Errorf("deleting category %d: %w", input.ID, err)), nil, nil

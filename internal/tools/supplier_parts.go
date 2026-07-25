@@ -52,6 +52,7 @@ func RegisterListManufacturerParts(server *mcp.Server, c *client.Client, r *coer
 		Name:        "list_manufacturer_parts",
 		Description: "List manufacturer part records, which map internal parts to a manufacturer's own part number (MPN). Filter by part to see who makes it, or by MPN to find the internal part for a manufacturer number.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, input ListManufacturerPartsInput) (*mcp.CallToolResult, any, error) {
+		c := callerClient(c, req)
 		limit := input.Limit
 		if limit <= 0 {
 			limit = 50
@@ -98,6 +99,7 @@ func RegisterCreateManufacturerPart(server *mcp.Server, c *client.Client, r *coe
 			DestructiveHint: boolPtr(false),
 		},
 	}, func(ctx context.Context, req *mcp.CallToolRequest, input CreateManufacturerPartInput) (*mcp.CallToolResult, any, error) {
+		c := callerClient(c, req)
 		if input.Part == 0 || input.Manufacturer == 0 || input.MPN == "" {
 			return errResult(fmt.Errorf("part, manufacturer and mpn are all required")), nil, nil
 		}
@@ -138,6 +140,7 @@ func RegisterSearchSupplierParts(server *mcp.Server, c *client.Client, r *coerce
 		Description: "Find supplier part records, which map internal parts to a vendor's SKU. " +
 			"Purchase order lines reference supplier parts, not parts directly, so use this to get the supplier part ID before adding an order line.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, input SearchSupplierPartsInput) (*mcp.CallToolResult, any, error) {
+		c := callerClient(c, req)
 		limit := input.Limit
 		if limit <= 0 {
 			limit = 50
@@ -190,6 +193,7 @@ func RegisterCreateSupplierPart(server *mcp.Server, c *client.Client, r *coerce.
 			DestructiveHint: boolPtr(false),
 		},
 	}, func(ctx context.Context, req *mcp.CallToolRequest, input CreateSupplierPartInput) (*mcp.CallToolResult, any, error) {
+		c := callerClient(c, req)
 		if input.Part == 0 || input.Supplier == 0 || input.SKU == "" {
 			return errResult(fmt.Errorf("part, supplier and sku are all required")), nil, nil
 		}

@@ -38,6 +38,7 @@ func RegisterSearchCompanies(server *mcp.Server, c *client.Client, r *coerce.Reg
 		Name:        "search_companies",
 		Description: "Search for companies (suppliers, manufacturers, customers) by name. Always search before creating a company, so vendors are not duplicated with slight spelling differences.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, input SearchCompaniesInput) (*mcp.CallToolResult, any, error) {
+		c := callerClient(c, req)
 		limit := input.Limit
 		if limit <= 0 {
 			limit = 25
@@ -86,6 +87,7 @@ func RegisterCreateCompany(server *mcp.Server, c *client.Client, r *coerce.Regis
 			DestructiveHint: boolPtr(false),
 		},
 	}, func(ctx context.Context, req *mcp.CallToolRequest, input CreateCompanyInput) (*mcp.CallToolResult, any, error) {
+		c := callerClient(c, req)
 		if input.Name == "" {
 			return errResult(fmt.Errorf("name is required")), nil, nil
 		}

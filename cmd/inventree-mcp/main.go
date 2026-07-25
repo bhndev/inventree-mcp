@@ -38,7 +38,13 @@ func main() {
 		log.Fatal(err)
 	}
 
+	// In OAuth mode each InvenTree call carries the requesting user's own token,
+	// so InvenTree enforces that user's role permissions. Otherwise every call
+	// is attributed to the shared service account.
 	c := client.New(cfg.URL, cfg.Token)
+	if cfg.ForwardsCallerCredentials() {
+		c = client.NewForwarding(cfg.URL)
+	}
 	imgClient := imagesearch.New(cfg.GoogleAPIKey, cfg.GoogleCSEID)
 
 	server := mcp.NewServer(&mcp.Implementation{

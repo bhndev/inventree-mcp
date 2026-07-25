@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"strings"
 
 	"github.com/chrisbotelho/inventree-mcp/internal/client"
 	"github.com/chrisbotelho/inventree-mcp/internal/coerce"
@@ -50,6 +51,7 @@ func RegisterSearchParts(server *mcp.Server, c *client.Client, r *coerce.Registr
 		Name:        "search_parts",
 		Description: "Search for parts by name, keyword, or description. Use this to find existing parts before creating new ones. Returns matching parts with their IDs, names, categories, and stock levels.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, input SearchPartsInput) (*mcp.CallToolResult, any, error) {
+		c := callerClient(c, req)
 		limit := input.Limit
 		if limit <= 0 {
 			limit = 25
@@ -77,6 +79,7 @@ func RegisterGetPart(server *mcp.Server, c *client.Client, r *coerce.Registry) {
 		Name:        "get_part",
 		Description: "Get detailed information about a specific part by its ID.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, input GetPartInput) (*mcp.CallToolResult, any, error) {
+		c := callerClient(c, req)
 		path := fmt.Sprintf("/api/part/%d/?format=json", input.ID)
 		var part Part
 		if err := c.Get(path, &part); err != nil {
@@ -112,6 +115,7 @@ func RegisterCreatePart(server *mcp.Server, c *client.Client, r *coerce.Registry
 			DestructiveHint: boolPtr(false),
 		},
 	}, func(ctx context.Context, req *mcp.CallToolRequest, input CreatePartInput) (*mcp.CallToolResult, any, error) {
+		c := callerClient(c, req)
 		payload := map[string]any{
 			"name": input.Name,
 		}
@@ -180,6 +184,7 @@ func RegisterUpdatePart(server *mcp.Server, c *client.Client, r *coerce.Registry
 		Name:        "update_part",
 		Description: "Update an existing part's fields. Only provided fields are changed. Use this to rename parts, change categories, update descriptions, or deactivate parts.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, input UpdatePartInput) (*mcp.CallToolResult, any, error) {
+		c := callerClient(c, req)
 		payload := map[string]any{}
 		if input.Name != "" {
 			payload["name"] = input.Name
@@ -236,6 +241,7 @@ func RegisterDeletePart(server *mcp.Server, c *client.Client, r *coerce.Registry
 			DestructiveHint: boolPtr(true),
 		},
 	}, func(ctx context.Context, req *mcp.CallToolRequest, input DeletePartInput) (*mcp.CallToolResult, any, error) {
+		c := callerClient(c, req)
 		path := fmt.Sprintf("/api/part/%d/", input.ID)
 		// InvenTree requires parts to be inactive before deletion
 		if err := c.Patch(path, map[string]any{"active": false}, nil); err != nil {
@@ -261,6 +267,7 @@ func RegisterListParts(server *mcp.Server, c *client.Client, r *coerce.Registry)
 		Name:        "list_parts",
 		Description: "List all parts, optionally filtered by category. Use search_parts for finding specific parts by name.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, input ListPartsInput) (*mcp.CallToolResult, any, error) {
+		c := callerClient(c, req)
 		limit := input.Limit
 		if limit <= 0 {
 			limit = 50
@@ -293,6 +300,7 @@ func RegisterSetPartImage(server *mcp.Server, c *client.Client, r *coerce.Regist
 		Name:        "set_part_image",
 		Description: "Set or replace the image for an existing part by providing an image URL. InvenTree downloads the image from the URL server-side. Use this after search_part_images to attach a product photo to a part.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, input SetPartImageInput) (*mcp.CallToolResult, any, error) {
+		c := callerClient(c, req)
 		if input.ImageURL == "" {
 			return errResult(fmt.Errorf("image_url is required")), nil, nil
 		}
@@ -353,6 +361,45 @@ func RegisterSearchPartImages(server *mcp.Server, imgClient *imagesearch.Client,
 }
 
 // -- helpers shared by all tool files --
+
+// callerClient returns the client a tool handler should use for InvenTree calls.
+//
+// When the server authenticates callers with a shared token, c already holds
+// the service-account credential and is returned unchanged. When it verifies
+// per-user OAuth tokens, c carries no credential and the end user's access
+// token is forwarded instead, so InvenTree applies that user's own role
+// permissions rather than the service account's.
+//
+// The token is read from the HTTP request that carried this specific tool call,
+// so it stays current as the client refreshes it.
+//
+// Every handler must call this. Skipping it yields a client that refuses to
+// issue requests, which surfaces as a clear error rather than a silent
+// escalation to a wider credential.
+func callerClient(c *client.Client, req *mcp.CallToolRequest) *client.Client {
+	if !c.RequiresCaller() {
+		return c
+	}
+	if token := bearerToken(req); token != "" {
+		return c.WithCallerToken(token)
+	}
+	return c
+}
+
+// bearerToken extracts the caller's OAuth access token from the request that
+// carried this tool call. Returns "" when there is no HTTP request behind the
+// call (for example over stdio) or no bearer credential on it.
+func bearerToken(req *mcp.CallToolRequest) string {
+	if req == nil || req.Extra == nil || req.Extra.Header == nil {
+		return ""
+	}
+	const prefix = "bearer "
+	authz := req.Extra.Header.Get("Authorization")
+	if len(authz) <= len(prefix) || !strings.EqualFold(authz[:len(prefix)], prefix) {
+		return ""
+	}
+	return strings.TrimSpace(authz[len(prefix):])
+}
 
 func errResult(err error) *mcp.CallToolResult {
 	r := &mcp.CallToolResult{}
