@@ -1,4 +1,7 @@
-FROM golang:1.23-alpine AS build
+# Must satisfy the `go 1.23.5` directive in go.mod. A 1.23.x image older than
+# that patch would make the build fetch a toolchain at build time, which fails
+# on a builder without network access.
+FROM golang:1.24-alpine AS build
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
