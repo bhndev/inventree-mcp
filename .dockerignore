@@ -1,0 +1,9 @@
+.git
+.gitignore
+*.md
+*.csv
+.DS_Store
+inventree-mcp
+inventree-mcp-*
+Dockerfile
+.dockerignore
