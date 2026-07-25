@@ -138,7 +138,9 @@ func installAuth(cfg *config.Config, mux *http.ServeMux, next http.Handler) http
 	// Scopes are advertised to Claude in either mode, but only introspection
 	// reports the scopes a token actually carries, so only it can enforce them
 	// here. Under UserInfo the check would compare against an empty set and
-	// reject every request. InvenTree enforces scopes per endpoint regardless.
+	// reject every request. Note that InvenTree was not observed to enforce
+	// scopes itself, so under UserInfo a trimmed scope list shapes the consent
+	// screen but does not constrain the token — see config.Config.OAuthScopes.
 	var enforce []string
 	if cfg.OAuthVerify == config.VerifyIntrospect {
 		verifier = auth.NewIntrospector(

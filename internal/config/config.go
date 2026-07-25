@@ -69,8 +69,16 @@ type Config struct {
 	// OAuthScopes is the set Claude is asked to request during consent. It is
 	// advertised in the protected resource metadata. Whether this server also
 	// *enforces* them depends on OAuthVerify: only introspection reports the
-	// scopes a token actually carries. InvenTree enforces them per endpoint
-	// against the forwarded token either way.
+	// scopes a token actually carries.
+	//
+	// Do not treat a trimmed scope list as an access control on its own.
+	// Measured against a live InvenTree 1.4 instance, a token granted only
+	// "openid g:read r:view:part" could still read /api/order/po/. That test
+	// ran as a superuser, so it does not distinguish "superusers bypass scope
+	// checks" from "the API does not gate on scopes at all" — but until that is
+	// settled, the effective limit on a forwarded token is the InvenTree user's
+	// own role permissions. Connect as a user whose roles match the access the
+	// tools should have.
 	//
 	// OAuth settings, used when AuthMode is AuthOAuth.
 	OAuthIssuer           string

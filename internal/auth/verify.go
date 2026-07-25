@@ -97,9 +97,11 @@ func (c *tokenCache) put(token string, info *mcpauth.TokenInfo) {
 //     InvenTree stays the authority: once the cached entry lapses the token is
 //     presented again, and one InvenTree has since rejected fails then. A token
 //     that expires mid-window fails at the InvenTree call itself.
-//   - Scopes are unknown, so scope gating cannot be enforced here. InvenTree
-//     enforces scopes per endpoint against the forwarded token, which is where
-//     the real check belongs.
+//   - Scopes are unknown, so scope gating cannot be enforced here. That leaves
+//     the InvenTree user's own role permissions as the effective limit on what
+//     a forwarded token can do; InvenTree was not observed to refuse an
+//     endpoint whose scope had not been granted. Use [NewIntrospector] when
+//     scopes must be enforced rather than merely requested.
 type UserInfoVerifier struct {
 	endpoint   string
 	httpClient *http.Client
