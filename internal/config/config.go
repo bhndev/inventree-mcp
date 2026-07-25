@@ -25,9 +25,23 @@ const (
 	// Simple, but every caller is indistinguishable and InvenTree sees only the
 	// service account.
 	AuthToken AuthMode = "token"
-	// AuthOAuth verifies per-user OAuth 2.0 tokens issued by InvenTree by RFC
-	// 7662 introspection. This server acts purely as a resource server.
+	// AuthOAuth verifies per-user OAuth 2.0 tokens issued by InvenTree. This
+	// server acts purely as a resource server.
 	AuthOAuth AuthMode = "oauth"
+)
+
+// VerifyMode selects how an OAuth access token is checked against InvenTree.
+type VerifyMode string
+
+const (
+	// VerifyUserInfo presents the token to the OIDC UserInfo endpoint. This is
+	// the default because it is what InvenTree actually advertises, and it needs
+	// no client credentials.
+	VerifyUserInfo VerifyMode = "userinfo"
+	// VerifyIntrospect uses an RFC 7662 introspection endpoint. It is the only
+	// mode that reports token scopes, but InvenTree neither advertises the
+	// endpoint nor publishes a scope granting access to it.
+	VerifyIntrospect VerifyMode = "introspect"
 )
 
 // Config holds the InvenTree connection and transport settings.
@@ -53,6 +67,8 @@ type Config struct {
 
 	// OAuth settings, used when AuthMode is AuthOAuth.
 	OAuthIssuer           string
+	OAuthVerify           VerifyMode
+	OAuthUserInfoURL      string
 	OAuthIntrospectionURL string
 	OAuthClientID         string
 	OAuthClientSecret     string
@@ -88,6 +104,10 @@ func Load() (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
+	verify, err := loadVerifyMode()
+	if err != nil {
+		return nil, err
+	}
 
 	cfg := &Config{
 		URL:                   url,
@@ -99,6 +119,8 @@ func Load() (*Config, error) {
 		AuthToken:             os.Getenv("MCP_AUTH_TOKEN"),
 		PublicURL:             strings.TrimRight(os.Getenv("MCP_PUBLIC_URL"), "/"),
 		OAuthIssuer:           strings.TrimRight(os.Getenv("OAUTH_ISSUER"), "/"),
+		OAuthVerify:           verify,
+		OAuthUserInfoURL:      os.Getenv("OAUTH_USERINFO_URL"),
 		OAuthIntrospectionURL: os.Getenv("OAUTH_INTROSPECTION_URL"),
 		OAuthClientID:         os.Getenv("OAUTH_CLIENT_ID"),
 		OAuthClientSecret:     os.Getenv("OAUTH_CLIENT_SECRET"),
@@ -148,21 +170,35 @@ func (c *Config) validateHTTP() error {
 		if c.OAuthIssuer == "" {
 			missing = append(missing, "OAUTH_ISSUER")
 		}
-		if c.OAuthClientID == "" {
-			missing = append(missing, "OAUTH_CLIENT_ID")
-		}
-		if c.OAuthClientSecret == "" {
-			missing = append(missing, "OAUTH_CLIENT_SECRET")
+		if c.OAuthVerify == VerifyIntrospect {
+			// Only introspection authenticates this server to InvenTree.
+			if c.OAuthClientID == "" {
+				missing = append(missing, "OAUTH_CLIENT_ID")
+			}
+			if c.OAuthClientSecret == "" {
+				missing = append(missing, "OAUTH_CLIENT_SECRET")
+			}
 		}
 		if len(missing) > 0 {
-			return fmt.Errorf("MCP_AUTH_MODE=oauth requires %s", strings.Join(missing, ", "))
+			return fmt.Errorf("MCP_AUTH_MODE=oauth (verify=%s) requires %s",
+				c.OAuthVerify, strings.Join(missing, ", "))
 		}
 		if !strings.HasPrefix(c.PublicURL, "https://") && !strings.HasPrefix(c.PublicURL, "http://") {
 			return fmt.Errorf("MCP_PUBLIC_URL must be an absolute URL, got %q", c.PublicURL)
 		}
+		// UserInfo reports no scopes, so a required-scope list could never be
+		// satisfied and every request would 403. Reject it at startup rather
+		// than silently ignore a security control or fail every call.
+		if c.OAuthVerify == VerifyUserInfo && len(c.OAuthScopes) > 0 {
+			return fmt.Errorf("OAUTH_SCOPES cannot be enforced with OAUTH_VERIFY=userinfo, " +
+				"which reports no scopes; InvenTree enforces scopes per endpoint against the " +
+				"forwarded token. Unset OAUTH_SCOPES, or use OAUTH_VERIFY=introspect")
+		}
+		// django-oauth-toolkit mounts both under the issuer prefix.
+		if c.OAuthUserInfoURL == "" {
+			c.OAuthUserInfoURL = c.OAuthIssuer + "/userinfo/"
+		}
 		if c.OAuthIntrospectionURL == "" {
-			// django-oauth-toolkit mounts introspection under the same prefix as
-			// the rest of its endpoints.
 			c.OAuthIntrospectionURL = c.OAuthIssuer + "/introspect/"
 		}
 	}
@@ -194,6 +230,17 @@ func loadAuthMode() (AuthMode, error) {
 		return AuthOAuth, nil
 	default:
 		return "", fmt.Errorf("unknown MCP_AUTH_MODE %q: want %q or %q", m, AuthToken, AuthOAuth)
+	}
+}
+
+func loadVerifyMode() (VerifyMode, error) {
+	switch v := VerifyMode(strings.ToLower(os.Getenv("OAUTH_VERIFY"))); v {
+	case "", VerifyUserInfo:
+		return VerifyUserInfo, nil
+	case VerifyIntrospect:
+		return VerifyIntrospect, nil
+	default:
+		return "", fmt.Errorf("unknown OAUTH_VERIFY %q: want %q or %q", v, VerifyUserInfo, VerifyIntrospect)
 	}
 }
 

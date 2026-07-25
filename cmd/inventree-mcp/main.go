@@ -96,7 +96,7 @@ func runHTTP(ctx context.Context, cfg *config.Config, server *mcp.Server) error 
 	errc := make(chan error, 1)
 	go func() {
 		log.Printf("inventree-mcp %s serving MCP over HTTP on %s (auth=%s)",
-			version, cfg.Addr(), cfg.AuthMode)
+			version, cfg.Addr(), authLabel(cfg))
 		errc <- srv.ListenAndServe()
 	}()
 
@@ -134,10 +134,13 @@ func installAuth(cfg *config.Config, mux *http.ServeMux, next http.Handler) http
 	mux.Handle("/.well-known/oauth-protected-resource", metadataHandler)
 	mux.Handle("/.well-known/oauth-protected-resource"+mcpPath, metadataHandler)
 
-	introspector := auth.NewIntrospector(
-		cfg.OAuthIntrospectionURL, cfg.OAuthClientID, cfg.OAuthClientSecret)
+	var verifier auth.Verifier = auth.NewUserInfoVerifier(cfg.OAuthUserInfoURL)
+	if cfg.OAuthVerify == config.VerifyIntrospect {
+		verifier = auth.NewIntrospector(
+			cfg.OAuthIntrospectionURL, cfg.OAuthClientID, cfg.OAuthClientSecret)
+	}
 
-	return mcpauth.RequireBearerToken(introspector.Verify, &mcpauth.RequireBearerTokenOptions{
+	return mcpauth.RequireBearerToken(verifier.Verify, &mcpauth.RequireBearerTokenOptions{
 		// The SDK interpolates this value into WWW-Authenticate without adding
 		// quotes, so quote it here to emit the RFC 9728 form
 		// (resource_metadata="https://…") rather than a bare URL.
@@ -185,4 +188,12 @@ func tokenValid(r *http.Request, want string) bool {
 		got = strings.TrimSpace(strings.TrimPrefix(authz, "Bearer "))
 	}
 	return subtle.ConstantTimeCompare([]byte(got), []byte(want)) == 1
+}
+
+// authLabel describes the active authentication scheme for the startup log.
+func authLabel(cfg *config.Config) string {
+	if cfg.AuthMode == config.AuthOAuth {
+		return string(cfg.AuthMode) + "/" + string(cfg.OAuthVerify)
+	}
+	return string(cfg.AuthMode)
 }
