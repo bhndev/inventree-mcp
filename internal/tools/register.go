@@ -68,5 +68,45 @@ func RegisterAll(server *mcp.Server, c *client.Client, imgClient *imagesearch.Cl
 	RegisterIssuePurchaseOrder(server, c, r)
 	RegisterReceivePurchaseOrder(server, c, r)
 
+	// Build orders (manufacturing an assembly from its BOM)
+	RegisterListBuildOrders(server, c, r)
+	RegisterGetBuildOrder(server, c, r)
+	RegisterCreateBuildOrder(server, c, r)
+	RegisterIssueBuildOrder(server, c, r)
+	RegisterAllocateBuildStock(server, c, r)
+	RegisterAutoAllocateBuildStock(server, c, r)
+	RegisterCreateBuildOutput(server, c, r)
+	RegisterCompleteBuildOutputs(server, c, r)
+	RegisterFinishBuildOrder(server, c, r)
+	RegisterCancelBuildOrder(server, c, r)
+
+	// Bills of materials (what a build order consumes)
+	RegisterGetBOM(server, c, r)
+	RegisterAddBOMItem(server, c, r)
+	RegisterUpdateBOMItem(server, c, r)
+	RegisterDeleteBOMItem(server, c, r)
+
+	// Sales orders
+	RegisterListSalesOrders(server, c, r)
+	RegisterGetSalesOrder(server, c, r)
+	RegisterCreateSalesOrder(server, c, r)
+	RegisterAddSalesOrderLine(server, c, r)
+	RegisterIssueSalesOrder(server, c, r)
+	RegisterCreateSalesOrderShipment(server, c, r)
+	RegisterAllocateSalesOrderStock(server, c, r)
+	RegisterShipSalesOrderShipment(server, c, r)
+	RegisterCompleteSalesOrder(server, c, r)
+	RegisterCancelSalesOrder(server, c, r)
+
+	// Return orders (RMAs)
+	RegisterListReturnOrders(server, c, r)
+	RegisterGetReturnOrder(server, c, r)
+	RegisterCreateReturnOrder(server, c, r)
+	RegisterAddReturnOrderLine(server, c, r)
+	RegisterIssueReturnOrder(server, c, r)
+	RegisterReceiveReturnOrder(server, c, r)
+	RegisterCompleteReturnOrder(server, c, r)
+	RegisterCancelReturnOrder(server, c, r)
+
 	return r
 }
