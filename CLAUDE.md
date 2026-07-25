@@ -143,6 +143,44 @@ Measured against a live 1.4 instance. Re-verify before relying on any of it.
 - The application must have an **OIDC algorithm** (e.g. RS256) selected, or the `openid` scope is unavailable and UserInfo verification fails.
 - Refresh tokens **are** issued even though `offline_access` is absent from `scopes_supported`.
 - **Scopes were not observed to be enforced** by the API: a token granted only `openid g:read r:view:part` still read `/api/order/po/`. That test ran as a superuser, so it does not distinguish superuser bypass from no gating at all. Until settled, treat the connected user's **role permissions** as the real control, and do not connect Claude as a superuser.
+- **"Hash client secret" makes the plaintext unrecoverable.** The registration form pre-fills a generated secret; copy it *before* saving. Afterwards the field shows a Django digest (`pbkdf2_sha256$<iterations>$<salt>$<digest>`), and pasting that into a client fails the token exchange as `invalid_client`. A usable secret is ~128 characters of mixed alphanumerics and contains **no `$`**. Hashing works correctly at the token endpoint — the only cost is that the value can never be read back, so leave it unchecked if you would rather retrieve it later than regenerate.
+
+## Hosted deployment
+
+Applies when running behind a reverse proxy as a custom connector.
+
+**The connector URL is `{MCP_PUBLIC_URL}/mcp`, not the bare origin.** The bare origin routes to the same handler, but OAuth compares the URL entered in the client against the `resource` field this server advertises, and a mismatch fails the flow. Confirm they agree before debugging anything else:
+
+```bash
+curl -s https://mcp.example.com/.well-known/oauth-protected-resource
+```
+
+**Reverse proxy requirements:**
+
+- Do **not** block or 404 `/.well-known/*` on the MCP host. That is where the protected resource metadata lives, and blocking it breaks OAuth entirely. Some InvenTree proxy configs 404 those paths to stop probes falling through to the HTML catch-all — that rule belongs on the InvenTree host, never on this one.
+- Streamable HTTP holds long-lived SSE responses open, so response buffering must be off. In Caddy: `reverse_proxy inventree-mcp:8000 { flush_interval -1 }`.
+- If the authorization server sits behind the same proxy, serve its discovery document at the RFC 8414 path too. InvenTree only publishes OIDC discovery at `/o/.well-known/openid-configuration`; a client looking in the RFC 8414 location (`/.well-known/oauth-authorization-server/o`) gets nothing. An internal rewrite to the OIDC document satisfies both, and the `issuer` inside it validates either way.
+
+**Alongside an existing stack:** add the service in a `docker-compose.override.yml` rather than editing a vendored `docker-compose.yml`, which upgrades can overwrite. Use `expose`, not `ports` — the proxy owns the public interface. `depends_on` is unnecessary: this server opens no connection to InvenTree until a request arrives.
+
+**Never paste `docker compose config` output.** It renders every resolved environment variable, including admin passwords and API tokens from neighbouring services.
+
+## When OAuth fails
+
+The client reports one opaque message for every failure, so bisect from the outside in. Everything below is unauthenticated:
+
+```bash
+curl -s https://mcp.example.com/healthz                                       # process alive
+curl -s https://mcp.example.com/.well-known/oauth-protected-resource          # resource + issuer
+curl -sD- -o /dev/null -X POST https://mcp.example.com/mcp \
+  -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}'             # 401 + WWW-Authenticate
+curl -s https://inventree.example.com/o/.well-known/openid-configuration      # issuer reachable
+```
+
+If all four are correct, the fault is in the authorization server's application registration, not this server — this server logs nothing on a successful verification, so anything in its log during an attempt is the real error. In rough order of likelihood: the client secret is a hash rather than the plaintext; the redirect URI does not exactly match the client's callback; the application has no OIDC algorithm, so `openid` cannot be granted; or the client is registered public when the token endpoint requires a secret.
+
+To find out which, replay the authorization request directly against `/o/authorize/` with the same `response_type`, `client_id`, `redirect_uri`, `scope`, and `code_challenge_method=S256`. A redirect to a login page means the parameters were accepted and the fault is later, in the token exchange. A 400 names the offending parameter. This needs only the client ID — no secret, no password.
 
 ## SDK details worth knowing
 
