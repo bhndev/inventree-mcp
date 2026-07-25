@@ -135,9 +135,15 @@ func installAuth(cfg *config.Config, mux *http.ServeMux, next http.Handler) http
 	mux.Handle("/.well-known/oauth-protected-resource"+mcpPath, metadataHandler)
 
 	var verifier auth.Verifier = auth.NewUserInfoVerifier(cfg.OAuthUserInfoURL)
+	// Scopes are advertised to Claude in either mode, but only introspection
+	// reports the scopes a token actually carries, so only it can enforce them
+	// here. Under UserInfo the check would compare against an empty set and
+	// reject every request. InvenTree enforces scopes per endpoint regardless.
+	var enforce []string
 	if cfg.OAuthVerify == config.VerifyIntrospect {
 		verifier = auth.NewIntrospector(
 			cfg.OAuthIntrospectionURL, cfg.OAuthClientID, cfg.OAuthClientSecret)
+		enforce = cfg.OAuthScopes
 	}
 
 	return mcpauth.RequireBearerToken(verifier.Verify, &mcpauth.RequireBearerTokenOptions{
@@ -145,7 +151,7 @@ func installAuth(cfg *config.Config, mux *http.ServeMux, next http.Handler) http
 		// quotes, so quote it here to emit the RFC 9728 form
 		// (resource_metadata="https://…") rather than a bare URL.
 		ResourceMetadataURL: strconv.Quote(cfg.ResourceMetadataURL()),
-		Scopes:              cfg.OAuthScopes,
+		Scopes:              enforce,
 	})(next)
 }
 

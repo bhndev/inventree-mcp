@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 )
 
@@ -65,6 +66,12 @@ type Config struct {
 	// be identical to the entered URL, and a mismatch fails the OAuth flow.
 	PublicURL string
 
+	// OAuthScopes is the set Claude is asked to request during consent. It is
+	// advertised in the protected resource metadata. Whether this server also
+	// *enforces* them depends on OAuthVerify: only introspection reports the
+	// scopes a token actually carries. InvenTree enforces them per endpoint
+	// against the forwarded token either way.
+	//
 	// OAuth settings, used when AuthMode is AuthOAuth.
 	OAuthIssuer           string
 	OAuthVerify           VerifyMode
@@ -186,13 +193,21 @@ func (c *Config) validateHTTP() error {
 		if !strings.HasPrefix(c.PublicURL, "https://") && !strings.HasPrefix(c.PublicURL, "http://") {
 			return fmt.Errorf("MCP_PUBLIC_URL must be an absolute URL, got %q", c.PublicURL)
 		}
-		// UserInfo reports no scopes, so a required-scope list could never be
-		// satisfied and every request would 403. Reject it at startup rather
-		// than silently ignore a security control or fail every call.
-		if c.OAuthVerify == VerifyUserInfo && len(c.OAuthScopes) > 0 {
-			return fmt.Errorf("OAUTH_SCOPES cannot be enforced with OAUTH_VERIFY=userinfo, " +
-				"which reports no scopes; InvenTree enforces scopes per endpoint against the " +
-				"forwarded token. Unset OAUTH_SCOPES, or use OAUTH_VERIFY=introspect")
+		// OAUTH_SCOPES is the set Claude is asked to request. Leaving it empty
+		// does not mean "no scopes": Claude falls back to whatever the
+		// authorization server advertises, which on InvenTree is every scope it
+		// knows, including r:delete:*. Demand an explicit list so consent is
+		// scoped to what the tools actually need.
+		if len(c.OAuthScopes) == 0 {
+			return fmt.Errorf("OAUTH_SCOPES is required with MCP_AUTH_MODE=oauth: " +
+				"without it Claude requests every scope InvenTree advertises, " +
+				"including delete permissions")
+		}
+		// UserInfo is an OIDC endpoint and rejects a token lacking this scope,
+		// which would make every request look like a bad credential.
+		if c.OAuthVerify == VerifyUserInfo && !slices.Contains(c.OAuthScopes, "openid") {
+			return fmt.Errorf("OAUTH_SCOPES must include %q with OAUTH_VERIFY=userinfo: "+
+				"the UserInfo endpoint rejects tokens without it", "openid")
 		}
 		// django-oauth-toolkit mounts both under the issuer prefix.
 		if c.OAuthUserInfoURL == "" {
