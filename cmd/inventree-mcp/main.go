@@ -8,21 +8,29 @@ import (
 	"log"
 	"net/http"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
 
+	"github.com/chrisbotelho/inventree-mcp/internal/auth"
 	"github.com/chrisbotelho/inventree-mcp/internal/client"
 	"github.com/chrisbotelho/inventree-mcp/internal/config"
 	"github.com/chrisbotelho/inventree-mcp/internal/imagesearch"
 	"github.com/chrisbotelho/inventree-mcp/internal/tools"
+	mcpauth "github.com/modelcontextprotocol/go-sdk/auth"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/modelcontextprotocol/go-sdk/oauthex"
 )
 
 // version is stamped at build time:
 //
 //	go build -ldflags "-X main.version=$(git describe --always --dirty)"
 var version = "dev"
+
+// mcpPath is the canonical path the MCP endpoint is served on. It is part of
+// the OAuth resource identifier, so it must match the URL entered in Claude.
+const mcpPath = "/mcp"
 
 func main() {
 	cfg, err := config.Load()
@@ -57,14 +65,19 @@ func main() {
 
 // runHTTP serves MCP over Streamable HTTP until ctx is cancelled.
 func runHTTP(ctx context.Context, cfg *config.Config, server *mcp.Server) error {
-	handler := mcp.NewStreamableHTTPHandler(
+	mcpHandler := mcp.NewStreamableHTTPHandler(
 		func(*http.Request) *mcp.Server { return server }, nil)
 
 	mux := http.NewServeMux()
 	// Unauthenticated so container and reverse-proxy probes stay cheap. It
 	// reports liveness only and exposes nothing about the InvenTree instance.
 	mux.HandleFunc("/healthz", healthz)
-	mux.Handle("/", requireToken(cfg.AuthToken, handler))
+
+	protected := installAuth(cfg, mux, mcpHandler)
+	mux.Handle(mcpPath, protected)
+	// Also accept the bare origin, so a connector configured without the /mcp
+	// suffix still reaches the server rather than 404ing.
+	mux.Handle("/", protected)
 
 	srv := &http.Server{
 		Addr:    cfg.Addr(),
@@ -76,7 +89,8 @@ func runHTTP(ctx context.Context, cfg *config.Config, server *mcp.Server) error 
 
 	errc := make(chan error, 1)
 	go func() {
-		log.Printf("inventree-mcp %s serving MCP over HTTP on %s", version, cfg.Addr())
+		log.Printf("inventree-mcp %s serving MCP over HTTP on %s (auth=%s)",
+			version, cfg.Addr(), cfg.AuthMode)
 		errc <- srv.ListenAndServe()
 	}()
 
@@ -92,6 +106,38 @@ func runHTTP(ctx context.Context, cfg *config.Config, server *mcp.Server) error 
 		defer cancel()
 		return srv.Shutdown(shutdownCtx)
 	}
+}
+
+// installAuth wraps the MCP handler in the configured authentication scheme,
+// registering any discovery routes that scheme needs on mux.
+func installAuth(cfg *config.Config, mux *http.ServeMux, next http.Handler) http.Handler {
+	if cfg.AuthMode != config.AuthOAuth {
+		return requireToken(cfg.AuthToken, next)
+	}
+
+	metadata := &oauthex.ProtectedResourceMetadata{
+		// Must equal the URL entered in Claude, exactly (RFC 9728 §3.1).
+		Resource:               cfg.PublicURL + mcpPath,
+		AuthorizationServers:   []string{cfg.OAuthIssuer},
+		BearerMethodsSupported: []string{"header"},
+		ScopesSupported:        cfg.OAuthScopes,
+	}
+	metadataHandler := mcpauth.ProtectedResourceMetadataHandler(metadata)
+	// RFC 9728 §3.1: clients try the path-suffixed variant first when the
+	// resource URL has a path component, then fall back to the bare path.
+	mux.Handle("/.well-known/oauth-protected-resource", metadataHandler)
+	mux.Handle("/.well-known/oauth-protected-resource"+mcpPath, metadataHandler)
+
+	introspector := auth.NewIntrospector(
+		cfg.OAuthIntrospectionURL, cfg.OAuthClientID, cfg.OAuthClientSecret)
+
+	return mcpauth.RequireBearerToken(introspector.Verify, &mcpauth.RequireBearerTokenOptions{
+		// The SDK interpolates this value into WWW-Authenticate without adding
+		// quotes, so quote it here to emit the RFC 9728 form
+		// (resource_metadata="https://…") rather than a bare URL.
+		ResourceMetadataURL: strconv.Quote(cfg.ResourceMetadataURL()),
+		Scopes:              cfg.OAuthScopes,
+	})(next)
 }
 
 func healthz(w http.ResponseWriter, r *http.Request) {
@@ -126,11 +172,11 @@ func tokenValid(r *http.Request, want string) bool {
 		return false
 	}
 	got := strings.TrimSpace(r.Header.Get("X-Api-Key"))
-	if auth := r.Header.Get("Authorization"); auth != "" {
+	if authz := r.Header.Get("Authorization"); authz != "" {
 		// Tolerate a missing "Bearer " prefix: the connector UI sends the header
 		// value verbatim, so an admin who omits the scheme gets a working
 		// connector rather than a silent 401.
-		got = strings.TrimSpace(strings.TrimPrefix(auth, "Bearer "))
+		got = strings.TrimSpace(strings.TrimPrefix(authz, "Bearer "))
 	}
 	return subtle.ConstantTimeCompare([]byte(got), []byte(want)) == 1
 }
