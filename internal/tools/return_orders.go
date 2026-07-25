@@ -153,7 +153,7 @@ func RegisterCreateReturnOrder(server *mcp.Server, c *client.Client, r *coerce.R
 
 		reference := input.Reference
 		if reference == "" {
-			generated, err := nextReference(c, "/api/order/ro/", "RO-")
+			generated, err := nextReference(c, "/api/order/ro/", "RETURNORDER_REFERENCE_PATTERN", "RO-")
 			if err != nil {
 				return errResult(err), nil, nil
 			}

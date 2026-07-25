@@ -139,7 +139,7 @@ func RegisterCreatePurchaseOrder(server *mcp.Server, c *client.Client, r *coerce
 
 		reference := input.Reference
 		if reference == "" {
-			generated, err := nextReference(c, "/api/order/po/", "PO-")
+			generated, err := nextReference(c, "/api/order/po/", "PURCHASEORDER_REFERENCE_PATTERN", "PO-")
 			if err != nil {
 				return errResult(err), nil, nil
 			}

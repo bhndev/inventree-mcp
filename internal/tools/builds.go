@@ -192,7 +192,7 @@ func RegisterCreateBuildOrder(server *mcp.Server, c *client.Client, r *coerce.Re
 
 		reference := input.Reference
 		if reference == "" {
-			generated, err := nextReference(c, "/api/build/", "BO-")
+			generated, err := nextReference(c, "/api/build/", "BUILDORDER_REFERENCE_PATTERN", "BO-")
 			if err != nil {
 				return errResult(err), nil, nil
 			}
@@ -342,7 +342,8 @@ func RegisterAutoAllocateBuildStock(server *mcp.Server, c *client.Client, r *coe
 		Description: "Let InvenTree automatically allocate available stock to a build order's untracked component lines. " +
 			"This is the quick path when you do not care which specific stock items are used. " +
 			"It only handles untracked components -- trackable ones must still be allocated per output with allocate_build_stock. " +
-			"Call get_build_order afterwards to see what it managed to allocate and what is still short.",
+			"InvenTree performs this in the BACKGROUND: a success here means the request was accepted, not that allocation has finished. " +
+			"Call get_build_order afterwards and confirm each line's allocated quantity before moving on, rather than assuming it worked.",
 		Annotations: &mcp.ToolAnnotations{
 			DestructiveHint: boolPtr(false),
 		},
@@ -445,7 +446,10 @@ func RegisterCompleteBuildOutputs(server *mcp.Server, c *client.Client, r *coerc
 		Name: "complete_build_outputs",
 		Description: "Complete one or more build outputs, consuming their allocated components and turning the outputs into finished stock. " +
 			"This completes OUTPUTS, not the build order itself -- use finish_build_order to close the order once all outputs are done. " +
-			"Components must be allocated first or completion fails.",
+			"Components must be allocated first or completion fails. " +
+			"InvenTree performs this in the BACKGROUND, so calling finish_build_order immediately afterwards can fail with " +
+			"'Required build quantity has not been completed'. Confirm with get_build_order that completed has reached the ordered " +
+			"quantity before finishing.",
 		Annotations: &mcp.ToolAnnotations{
 			DestructiveHint: boolPtr(true),
 		},
@@ -507,7 +511,9 @@ func RegisterFinishBuildOrder(server *mcp.Server, c *client.Client, r *coerce.Re
 		Description: "Finish (complete) a build order, moving it to COMPLETE. " +
 			"This closes the ORDER; complete the individual outputs first with complete_build_outputs. " +
 			"By default InvenTree refuses to finish an order with unallocated components, incomplete outputs, or over-allocated stock -- " +
-			"the accept_* options override each of those, so only set them when you genuinely intend to close the order short.",
+			"the accept_* options override each of those, so only set them when you genuinely intend to close the order short. " +
+			"If it reports work as unallocated or incomplete that you have just done, that work is probably still running in the " +
+			"background: re-check with get_build_order and retry rather than setting an accept_* flag to force past it.",
 		Annotations: &mcp.ToolAnnotations{
 			DestructiveHint: boolPtr(true),
 		},

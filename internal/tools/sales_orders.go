@@ -156,7 +156,7 @@ func RegisterCreateSalesOrder(server *mcp.Server, c *client.Client, r *coerce.Re
 
 		reference := input.Reference
 		if reference == "" {
-			generated, err := nextReference(c, "/api/order/so/", "SO-")
+			generated, err := nextReference(c, "/api/order/so/", "SALESORDER_REFERENCE_PATTERN", "SO-")
 			if err != nil {
 				return errResult(err), nil, nil
 			}
@@ -209,6 +209,7 @@ func RegisterAddSalesOrderLine(server *mcp.Server, c *client.Client, r *coerce.R
 		Name: "add_sales_order_line",
 		Description: "Add a line item to a sales order. " +
 			"The line references an INTERNAL part -- this is the opposite of add_purchase_order_line, which takes a supplier part. " +
+			"The part must be marked salable; if it is not, set salable=true with update_part first. " +
 			"Sale price is per unit; InvenTree computes the extended total.",
 		Annotations: &mcp.ToolAnnotations{
 			DestructiveHint: boolPtr(false),
@@ -220,6 +221,23 @@ func RegisterAddSalesOrderLine(server *mcp.Server, c *client.Client, r *coerce.R
 		}
 		if input.Quantity <= 0 {
 			return errResult(fmt.Errorf("quantity must be greater than zero")), nil, nil
+		}
+
+		// InvenTree restricts this field to salable parts, and reports a
+		// non-salable one as `Invalid pk "N" - object does not exist`, which
+		// reads as though the part is missing entirely. Check first so the
+		// message names the actual problem and its fix.
+		var part struct {
+			Name    string `json:"name"`
+			Salable bool   `json:"salable"`
+		}
+		if err := c.Get(fmt.Sprintf("/api/part/%d/?format=json", input.Part), &part); err != nil {
+			return errResult(fmt.Errorf("getting part %d: %w", input.Part, err)), nil, nil
+		}
+		if !part.Salable {
+			return errResult(fmt.Errorf(
+				"part %d (%s) is not marked salable, so it cannot be sold; set salable=true with update_part first",
+				input.Part, part.Name)), nil, nil
 		}
 
 		payload := map[string]any{
@@ -296,8 +314,8 @@ func RegisterCreateSalesOrderShipment(server *mcp.Server, c *client.Client, r *c
 		Name: "create_sales_order_shipment",
 		Description: "Create a shipment against a sales order. Stock is allocated into a shipment, then the shipment is dispatched -- " +
 			"so a shipment must exist before allocate_sales_order_stock can be called. " +
-			"InvenTree usually creates a first shipment automatically with a new order, so check get_sales_order before creating another; " +
-			"add extra shipments only for split or partial deliveries.",
+			"A new sales order has NO shipment, so call this once before the first allocation, and again per split or partial delivery. " +
+			"Check get_sales_order first to see which shipments already exist.",
 		Annotations: &mcp.ToolAnnotations{
 			DestructiveHint: boolPtr(false),
 		},
@@ -453,7 +471,10 @@ func RegisterCompleteSalesOrder(server *mcp.Server, c *client.Client, r *coerce.
 		Name: "complete_sales_order",
 		Description: "Complete a sales order, moving it to COMPLETE. " +
 			"Ship the shipments first -- by default InvenTree refuses to complete an order with unshipped allocations, " +
-			"and accept_incomplete overrides that, so set it only when you genuinely intend to close the order short.",
+			"and accept_incomplete overrides that, so set it only when you genuinely intend to close the order short. " +
+			"Shipping is processed in the BACKGROUND, so calling this straight after ship_sales_order_shipment can fail with " +
+			"'Order has incomplete line items'. Re-check with get_sales_order that each line's shipped quantity has caught up, " +
+			"then retry, rather than setting accept_incomplete to force past it.",
 		Annotations: &mcp.ToolAnnotations{
 			DestructiveHint: boolPtr(true),
 		},

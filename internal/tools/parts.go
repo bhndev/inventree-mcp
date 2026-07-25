@@ -32,6 +32,7 @@ type Part struct {
 	Purchaseable bool     `json:"purchaseable"`
 	Assembly     bool     `json:"assembly"`
 	Component    bool     `json:"component"`
+	Salable      bool     `json:"salable"`
 	Trackable    bool     `json:"trackable"`
 	Virtual      bool     `json:"virtual"`
 	Image        *string  `json:"image"`
@@ -102,6 +103,7 @@ type CreatePartInput struct {
 	Purchaseable *bool  `json:"purchaseable,omitempty" jsonschema:"Whether the part can be purchased (default true)"`
 	Component    *bool  `json:"component,omitempty" jsonschema:"Whether the part is a component (default true)"`
 	Assembly     *bool  `json:"assembly,omitempty" jsonschema:"Whether the part is an assembly"`
+	Salable      *bool  `json:"salable,omitempty" jsonschema:"Whether the part can be sold to customers. Required before it can be added to a sales order line."`
 	Trackable    *bool  `json:"trackable,omitempty" jsonschema:"Whether the part is trackable by serial number"`
 	Virtual      *bool  `json:"virtual,omitempty" jsonschema:"Whether the part is virtual (not physical)"`
 	ImageURL     string `json:"image_url,omitempty" jsonschema:"URL of an image to attach to the part. InvenTree downloads it server-side."`
@@ -146,6 +148,9 @@ func RegisterCreatePart(server *mcp.Server, c *client.Client, r *coerce.Registry
 		if input.Assembly != nil {
 			payload["assembly"] = *input.Assembly
 		}
+		if input.Salable != nil {
+			payload["salable"] = *input.Salable
+		}
 		if input.Trackable != nil {
 			payload["trackable"] = *input.Trackable
 		}
@@ -172,6 +177,8 @@ type UpdatePartInput struct {
 	Description  string `json:"description,omitempty" jsonschema:"New description"`
 	Category     int    `json:"category,omitempty" jsonschema:"New category ID. 0 or omit to leave unchanged."`
 	Active       *bool  `json:"active,omitempty" jsonschema:"Whether the part is active"`
+	Assembly     *bool  `json:"assembly,omitempty" jsonschema:"Whether the part is an assembly. Required before it can be built with create_build_order."`
+	Salable      *bool  `json:"salable,omitempty" jsonschema:"Whether the part can be sold to customers. Required before it can be added to a sales order line."`
 	IPN          string `json:"IPN,omitempty" jsonschema:"New Internal Part Number"`
 	Keywords     string `json:"keywords,omitempty" jsonschema:"New keywords"`
 	Units        string `json:"units,omitempty" jsonschema:"New units of measure"`
@@ -197,6 +204,12 @@ func RegisterUpdatePart(server *mcp.Server, c *client.Client, r *coerce.Registry
 		}
 		if input.Active != nil {
 			payload["active"] = *input.Active
+		}
+		if input.Assembly != nil {
+			payload["assembly"] = *input.Assembly
+		}
+		if input.Salable != nil {
+			payload["salable"] = *input.Salable
 		}
 		if input.IPN != "" {
 			payload["IPN"] = input.IPN
