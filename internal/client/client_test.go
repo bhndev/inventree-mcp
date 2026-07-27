@@ -88,3 +88,54 @@ func TestWithCallerTokenDoesNotMutateBase(t *testing.T) {
 		t.Errorf("tokens crossed: first=%q second=%q", derived.token, other.token)
 	}
 }
+
+// serveStatus starts a server that replies with a fixed status, body and headers.
+func serveStatus(t *testing.T, status int, body string, hdr map[string]string) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		for k, v := range hdr {
+			w.Header().Set(k, v)
+		}
+		w.WriteHeader(status)
+		w.Write([]byte(body))
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+// A 403 has two causes needing opposite fixes. A missing OAuth scope is only
+// fixable by reconnecting, so the error must say so rather than sending the
+// operator to look at InvenTree roles that are already correct.
+func TestForbiddenReportsInsufficientScope(t *testing.T) {
+	srv := serveStatus(t, http.StatusForbidden, "", map[string]string{
+		"WWW-Authenticate": `Bearer realm="api", error="insufficient_scope", scope="r:add:part"`,
+	})
+
+	err := New(srv.URL, "tok").Post("/api/part/", map[string]any{}, nil)
+	if err == nil {
+		t.Fatal("Post: expected error")
+	}
+	for _, want := range []string{"r:add:part", "reconnect"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not mention %q", err, want)
+		}
+	}
+}
+
+// The other cause is a missing InvenTree role, which reconnecting will not fix.
+// DRF reports it as a "detail" string with no WWW-Authenticate challenge.
+func TestForbiddenReportsRolePermission(t *testing.T) {
+	srv := serveStatus(t, http.StatusForbidden,
+		`{"detail":"You do not have permission to perform this action."}`, nil)
+
+	err := New(srv.URL, "tok").Post("/api/part/", map[string]any{}, nil)
+	if err == nil {
+		t.Fatal("Post: expected error")
+	}
+	if !strings.Contains(err.Error(), "role permission") {
+		t.Errorf("error %q should identify this as a role permission", err)
+	}
+	if strings.Contains(err.Error(), "reconnect") {
+		t.Errorf("error %q wrongly suggests reconnecting", err)
+	}
+}

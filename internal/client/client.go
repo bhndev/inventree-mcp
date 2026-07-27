@@ -169,7 +169,7 @@ func decodeResponse(resp *http.Response, dest any) error {
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return apiError(resp.StatusCode, data)
+		return apiError(resp, data)
 	}
 
 	if dest == nil {
@@ -187,14 +187,21 @@ func decodeResponse(resp *http.Response, dest any) error {
 }
 
 // apiError returns a descriptive error for non-2xx responses.
-func apiError(status int, body []byte) error {
+func apiError(resp *http.Response, body []byte) error {
+	status := resp.StatusCode
 	msg := strings.TrimSpace(string(body))
 
 	switch status {
 	case http.StatusUnauthorized:
-		return fmt.Errorf("authentication failed (401): check INVENTREE_TOKEN")
+		return fmt.Errorf("authentication failed (401): %s", authDetail(resp, msg,
+			"the credential was rejected; check INVENTREE_TOKEN, or reconnect if using OAuth"))
 	case http.StatusForbidden:
-		return fmt.Errorf("permission denied (403): token lacks access to this resource")
+		// 401 and 403 have two very different causes that need opposite fixes:
+		// a scope the token was never granted (reconnect to re-consent) versus
+		// an InvenTree role the user does not hold (grant the role). Only the
+		// response says which, so never discard it — see authDetail.
+		return fmt.Errorf("permission denied (403): %s", authDetail(resp, msg,
+			"the credential is valid but not permitted to perform this operation"))
 	case http.StatusNotFound:
 		return fmt.Errorf("not found (404): resource does not exist")
 	default:
@@ -209,9 +216,92 @@ func apiError(status int, body []byte) error {
 	}
 }
 
+// authDetail explains a 401/403 using what the server actually reported.
+//
+// OAuth-aware servers signal the cause in WWW-Authenticate (RFC 6750): an
+// `error=insufficient_scope` means the token is fine but was never granted the
+// scope, which no amount of changing InvenTree roles will fix — the user must
+// reconnect and re-consent. Django REST Framework instead returns a `detail`
+// string in the body when a *role* permission is missing. Reporting whichever
+// is present is what makes the two distinguishable; the canned fallback is used
+// only when the server said nothing useful.
+func authDetail(resp *http.Response, body, fallback string) string {
+	if resp != nil {
+		if e, scope := bearerError(resp.Header.Get("WWW-Authenticate")); e != "" {
+			switch e {
+			case "insufficient_scope":
+				s := "the token was not granted the scope this operation needs"
+				if scope != "" {
+					s += " (" + scope + ")"
+				}
+				return s + "; disconnect and reconnect the connector to re-consent " +
+					"with the scopes the server now advertises"
+			case "invalid_token":
+				return "the token is expired, revoked, or malformed; reconnect the connector"
+			default:
+				return "OAuth error " + e
+			}
+		}
+	}
+
+	// Django REST Framework's {"detail": "..."} is the role-permission case.
+	if d := jsonDetail(body); d != "" {
+		return d + " — this is an InvenTree role permission, not an OAuth scope: " +
+			"grant the user's group the matching role"
+	}
+
+	if body != "" {
+		if len(body) > 300 {
+			body = body[:300] + "..."
+		}
+		// Redacted for the same reason network errors are: this is the one path
+		// that puts an unparsed upstream body into a message the model sees.
+		return redactToken(body)
+	}
+	return fallback
+}
+
+// bearerError extracts the error and scope parameters from a WWW-Authenticate
+// challenge, e.g. `Bearer realm="api", error="insufficient_scope", scope="r:add:part"`.
+func bearerError(header string) (errCode, scope string) {
+	if header == "" {
+		return "", ""
+	}
+	for _, part := range strings.Split(header, ",") {
+		k, v, ok := strings.Cut(strings.TrimSpace(part), "=")
+		if !ok {
+			continue
+		}
+		v = strings.Trim(strings.TrimSpace(v), `"`)
+		switch strings.ToLower(strings.TrimSpace(k)) {
+		case "error":
+			errCode = v
+		case "scope":
+			scope = v
+		}
+	}
+	return errCode, scope
+}
+
+// jsonDetail pulls the "detail" field out of a DRF error body, if present.
+func jsonDetail(body string) string {
+	var payload struct {
+		Detail string `json:"detail"`
+	}
+	if err := json.Unmarshal([]byte(body), &payload); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(payload.Detail)
+}
+
 // sanitizeError strips potential credential info from network errors.
 func sanitizeError(err error) string {
-	s := err.Error()
+	return redactToken(err.Error())
+}
+
+// redactToken removes any token value that might appear in a string bound for
+// a log line or a tool result.
+func redactToken(s string) string {
 	// Remove any token values that might appear in URL-related errors.
 	if i := strings.Index(s, "Token "); i != -1 {
 		end := strings.IndexAny(s[i+6:], " \"')")
