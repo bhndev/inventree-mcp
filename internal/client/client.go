@@ -2,6 +2,8 @@ package client
 
 import (
 	"bytes"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -9,6 +11,13 @@ import (
 	"net/url"
 	"strings"
 	"time"
+)
+
+// Authorization schemes accepted by the InvenTree REST API. Which one is in use
+// also decides whether the CSRF workaround below applies.
+const (
+	schemeToken  = "Token"  // a fixed InvenTree API token
+	schemeBearer = "Bearer" // a forwarded OAuth access token
 )
 
 // Client is an HTTP client for the InvenTree REST API.
@@ -34,7 +43,7 @@ func New(baseURL, token string) *Client {
 	return &Client{
 		baseURL: strings.TrimRight(baseURL, "/"),
 		token:   token,
-		scheme:  "Token",
+		scheme:  schemeToken,
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
@@ -64,7 +73,7 @@ func (c *Client) RequiresCaller() bool { return c.requiresCaller }
 func (c *Client) WithCallerToken(token string) *Client {
 	derived := *c
 	derived.token = token
-	derived.scheme = "Bearer"
+	derived.scheme = schemeBearer
 	derived.requiresCaller = false
 	return &derived
 }
@@ -99,11 +108,85 @@ func (c *Client) Do(method, path string, body io.Reader) (*http.Response, error)
 	req.Header.Set("Authorization", c.scheme+" "+c.token)
 	req.Header.Set("Content-Type", "application/json")
 
+	if c.scheme == schemeBearer && !csrfSafeMethod(method) {
+		if err := setCSRFHeaders(req, c.baseURL); err != nil {
+			return nil, fmt.Errorf("%s %s: %w", method, pathPart, err)
+		}
+	}
+
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("%s %s: %s", method, pathPart, sanitizeError(err))
 	}
 	return resp, nil
+}
+
+// csrfSafeMethod reports whether Django exempts a method from CSRF checking.
+// The list matches CsrfViewMiddleware.process_view, which accepts these
+// unconditionally — which is exactly why reads work today and writes do not.
+func csrfSafeMethod(method string) bool {
+	switch method {
+	case http.MethodGet, http.MethodHead, http.MethodOptions, http.MethodTrace:
+		return true
+	}
+	return false
+}
+
+// setCSRFHeaders satisfies Django's CSRF check on a bearer-authenticated write.
+//
+// InvenTree lists SessionAuthentication *before* ExtendedOAuth2Authentication in
+// DEFAULT_AUTHENTICATION_CLASSES, and runs oauth2_provider's OAuth2TokenMiddleware,
+// which populates request.user from the bearer token before DRF is reached. So
+// SessionAuthentication sees an active user, calls enforce_csrf(), and rejects
+// the request — the OAuth authenticator never gets a turn. GET is exempt, so the
+// symptom is that every read succeeds and every write 403s with
+// {"detail":"CSRF Failed: ..."}, which reads exactly like a permissions problem.
+// The API-token path is unaffected because ApiTokenAuthentication is first in
+// the list and returns before SessionAuthentication runs.
+//
+// Django's default CSRF is double-submit: CSRF_USE_SESSIONS is unset, so
+// _get_secret reads the csrftoken cookie and compares it against the
+// X-CSRFToken header and nothing else. The value is never tied to a session, so
+// a self-generated one satisfies the check. Origin is sent because
+// _origin_verified returns true immediately when it equals the request's own
+// host, which skips the stricter Referer check on HTTPS without depending on
+// how CSRF_TRUSTED_ORIGINS happens to be configured.
+//
+// This is not a bypass of protection that was doing anything. CSRF defends
+// *ambient* credentials — cookies a browser attaches on its own. This client
+// sends no session cookie and authenticates with an explicit Authorization
+// header, so there is no cross-site request for the check to prevent; it is
+// running only because of the authenticator ordering above. If InvenTree
+// reorders those classes, these headers become inert rather than breaking.
+func setCSRFHeaders(req *http.Request, baseURL string) error {
+	token, err := csrfToken()
+	if err != nil {
+		return err
+	}
+	u, err := url.Parse(baseURL)
+	if err != nil {
+		return fmt.Errorf("parsing base URL for CSRF origin: %w", err)
+	}
+
+	req.Header.Set("Origin", u.Scheme+"://"+u.Host)
+	req.Header.Set("X-CSRFToken", token)
+	req.AddCookie(&http.Cookie{Name: "csrftoken", Value: token})
+	return nil
+}
+
+// csrfToken returns a value Django accepts as a CSRF secret. _check_token_format
+// requires exactly CSRF_SECRET_LENGTH (32) or CSRF_TOKEN_LENGTH (64) characters
+// drawn from ASCII letters and digits; hex satisfies both constraints without
+// the modulo bias of folding random bytes into a 62-character alphabet.
+//
+// It is generated per request and compared only against itself, so it carries no
+// secrecy requirement — crypto/rand is used because there is no reason not to.
+func csrfToken() (string, error) {
+	b := make([]byte, 16) // 16 bytes -> 32 hex characters
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("generating CSRF token: %w", err)
+	}
+	return hex.EncodeToString(b), nil
 }
 
 // Get performs a GET request and decodes the JSON response into dest.

@@ -139,3 +139,115 @@ func TestForbiddenReportsRolePermission(t *testing.T) {
 		t.Errorf("error %q wrongly suggests reconnecting", err)
 	}
 }
+
+// captureRequest starts a server that records the whole inbound request.
+func captureRequest(t *testing.T) (*httptest.Server, **http.Request) {
+	t.Helper()
+	var got *http.Request
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.Clone(r.Context())
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"ok":true}`))
+	}))
+	t.Cleanup(srv.Close)
+	return srv, &got
+}
+
+// A bearer-authenticated write must carry the CSRF trio, or InvenTree's
+// SessionAuthentication rejects it before the OAuth authenticator is reached.
+// The cookie and the header must agree: Django compares them against each other.
+func TestBearerWriteSendsMatchingCSRFCookieAndHeader(t *testing.T) {
+	srv, got := captureRequest(t)
+
+	c := NewForwarding(srv.URL).WithCallerToken("user-access-token")
+	if err := c.Post("/api/part/", map[string]any{"name": "x"}, nil); err != nil {
+		t.Fatalf("Post: %v", err)
+	}
+
+	req := *got
+	header := req.Header.Get("X-CSRFToken")
+	if header == "" {
+		t.Fatal("X-CSRFToken not sent")
+	}
+	cookie, err := req.Cookie("csrftoken")
+	if err != nil {
+		t.Fatalf("csrftoken cookie not sent: %v", err)
+	}
+	if cookie.Value != header {
+		t.Errorf("cookie %q != header %q; Django compares the two", cookie.Value, header)
+	}
+	// _check_token_format: 32 or 64 characters, ASCII letters and digits only.
+	if n := len(header); n != 32 && n != 64 {
+		t.Errorf("token length = %d, want 32 or 64", n)
+	}
+	for _, r := range header {
+		if !('a' <= r && r <= 'z' || 'A' <= r && r <= 'Z' || '0' <= r && r <= '9') {
+			t.Errorf("token contains %q, outside CSRF_ALLOWED_CHARS", r)
+			break
+		}
+	}
+	// _origin_verified short-circuits when Origin equals the request's own host.
+	if want := srv.URL; req.Header.Get("Origin") != want {
+		t.Errorf("Origin = %q, want %q", req.Header.Get("Origin"), want)
+	}
+}
+
+// Each request gets its own token. Nothing depends on this, but a value reused
+// across requests would look like a fixed secret to anyone reading a capture.
+func TestCSRFTokenIsPerRequest(t *testing.T) {
+	seen := map[string]bool{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen[r.Header.Get("X-CSRFToken")] = true
+		w.Write([]byte(`{"ok":true}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	c := NewForwarding(srv.URL).WithCallerToken("user-access-token")
+	for range 3 {
+		if err := c.Post("/api/part/", map[string]any{}, nil); err != nil {
+			t.Fatalf("Post: %v", err)
+		}
+	}
+	if len(seen) != 3 {
+		t.Errorf("got %d distinct tokens across 3 requests, want 3", len(seen))
+	}
+}
+
+// GET is CSRF-exempt in Django, so sending the headers there would be noise.
+func TestBearerReadSendsNoCSRFHeaders(t *testing.T) {
+	srv, got := captureRequest(t)
+
+	var dest map[string]any
+	c := NewForwarding(srv.URL).WithCallerToken("user-access-token")
+	if err := c.Get("/api/part/", &dest); err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+
+	req := *got
+	if v := req.Header.Get("X-CSRFToken"); v != "" {
+		t.Errorf("X-CSRFToken = %q on a GET, want none", v)
+	}
+	if _, err := req.Cookie("csrftoken"); err == nil {
+		t.Error("csrftoken cookie sent on a GET, want none")
+	}
+}
+
+// The API-token path never hits SessionAuthentication, because
+// ApiTokenAuthentication is first in DEFAULT_AUTHENTICATION_CLASSES and returns
+// before it runs. Sending CSRF headers there would imply a problem that is not
+// there, so the workaround stays scoped to bearer auth.
+func TestServiceAccountWriteSendsNoCSRFHeaders(t *testing.T) {
+	srv, got := captureRequest(t)
+
+	if err := New(srv.URL, "svc-token").Post("/api/part/", map[string]any{}, nil); err != nil {
+		t.Fatalf("Post: %v", err)
+	}
+
+	req := *got
+	if v := req.Header.Get("X-CSRFToken"); v != "" {
+		t.Errorf("X-CSRFToken = %q for Token auth, want none", v)
+	}
+	if _, err := req.Cookie("csrftoken"); err == nil {
+		t.Error("csrftoken cookie sent for Token auth, want none")
+	}
+}
